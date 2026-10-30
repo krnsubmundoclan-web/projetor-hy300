@@ -15,7 +15,7 @@ import android.widget.TextView;
 
 import java.util.List;
 
-/** Grade com todos os apps (estilo Launchpad). Segurar OK adiciona/remove dos favoritos. */
+/** Grade com todos os apps (estilo Launchpad). Segurar OK abre a acao de adicionar. */
 public class AppsActivity extends Activity {
     private static final int COLS = 6;
 
@@ -29,7 +29,7 @@ public class AppsActivity extends Activity {
         TextView title = Ui.text(this, "Todos os apps", 34, Ui.w700, Ui.TEXT);
         title.setLetterSpacing(-0.02f);
         root.addView(title);
-        TextView hint = Ui.text(this, "Segure OK para adicionar ou remover dos favoritos", 15, Ui.w400, Ui.MUTED);
+        TextView hint = Ui.text(this, "OK abre o app · Segure OK para adicionar à tela inicial", 15, Ui.w400, Ui.MUTED);
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-2, -2);
         hlp.topMargin = Ui.dp(8);
         hlp.bottomMargin = Ui.dp(20);
@@ -88,8 +88,18 @@ public class AppsActivity extends Activity {
             }
         });
         c.setOnLongClickListener(v -> {
-            boolean added = Prefs.toggleFav(this, a.pkg);
-            App.inst.controller.hud.message(a.label + (added ? " adicionado aos favoritos" : " removido dos favoritos"));
+            Ui.appMenu(this, c, a.label, new String[]{"Adicionar à tela inicial"}, new Runnable[]{() -> {
+                if (Prefs.favs(this).contains(a.pkg)) {
+                    App.inst.controller.hud.message(a.label + " já está na tela inicial");
+                } else {
+                    List<Apps.Entry> before = Apps.favorites(this);
+                    String replaced = before.size() >= Prefs.MAX_FAVS
+                            ? before.get(before.size() - 1).label : null;
+                    Prefs.toggleFav(this, a.pkg);
+                    App.inst.controller.hud.message(a.label + " adicionado à tela inicial"
+                            + (replaced == null ? "" : " · " + replaced + " saiu para liberar espaço"));
+                }
+            }});
             return true;
         });
         return c;

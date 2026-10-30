@@ -205,4 +205,21 @@ final class Prefs {
         sp(c).edit().putString("favs", String.join(",", l)).apply();
         return added;
     }
+
+    /** Reordena apenas os apps visiveis; os ausentes mantem suas posicoes guardadas. */
+    static synchronized void reorderFavs(Context c, List<String> visibleOrder) {
+        List<String> saved = favs(c);
+        List<String> visible = new ArrayList<>();
+        for (String pkg : saved) {
+            if (Apps.entry(c, pkg) != null && visible.size() < MAX_FAVS) visible.add(pkg);
+        }
+        if (visible.size() != visibleOrder.size() || !visible.containsAll(visibleOrder)
+                || !visibleOrder.containsAll(visible)) return;
+        int next = 0;
+        for (int i = 0; i < saved.size(); i++) {
+            if (Apps.entry(c, saved.get(i)) != null && next < visibleOrder.size())
+                saved.set(i, visibleOrder.get(next++));
+        }
+        sp(c).edit().putString("favs", String.join(",", saved)).apply();
+    }
 }

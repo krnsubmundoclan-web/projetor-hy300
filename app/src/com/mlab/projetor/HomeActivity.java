@@ -1,5 +1,6 @@
 package com.mlab.projetor;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.ComponentName;
@@ -15,7 +16,10 @@ import android.os.StatFs;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewTreeObserver;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -23,7 +27,9 @@ import android.widget.TextClock;
 import android.widget.TextView;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Tela inicial inspirada no iPhone/macOS: relogio grande da tela de bloqueio, favoritos
@@ -33,7 +39,7 @@ public class HomeActivity extends Activity {
     private static final int COLS = 4;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private TextView selKind, selName, info;
+    private TextView selKind, selName, info, favoritesHint, reorderHint;
     private UsageRing temperatureUsage, cpuUsage, ramUsage, storageUsage, internetUsage;
     private View hardwarePanel;
     private final HardwareUsage hardware = new HardwareUsage();
@@ -52,6 +58,10 @@ public class HomeActivity extends Activity {
     private static final long QR_TIMEOUT_MS = 2 * 60_000L;
     private final Runnable hideQr = () -> showQr(false);
     private LinearLayout grid, recents;
+    private List<Apps.Entry> reorderFavorites;
+    private String movingPkg;
+    private float favoriteGapDp = 16, favoriteRowGapDp = 20;
+    private ValueAnimator favoriteSpacing;
     /** Itens do Dock, para ligar a seta para baixo dos cartoes ao Dock (o FocusFinder nao acha sozinho). */
     private final List<View> dockItems = new ArrayList<>();
 
@@ -134,6 +144,12 @@ public class HomeActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        reorderFavorites = null;
+        movingPkg = null;
+        if (favoriteSpacing != null) favoriteSpacing.cancel();
+        favoriteGapDp = 16;
+        favoriteRowGapDp = 20;
+        showReorderHint(false);
         handler.removeCallbacks(tick);
         handler.removeCallbacks(hardwareTick);
         hardware.resetCpu();
@@ -142,6 +158,10 @@ public class HomeActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (reorderFavorites != null) {
+            finishReorder(false);
+            return;
+        }
         // Launcher: voltar na tela inicial so fecha o QR, se estiver aberto.
         if (qrPanel != null && qrPanel.getVisibility() == View.VISIBLE) showQr(false);
     }
@@ -174,8 +194,8 @@ public class HomeActivity extends Activity {
         mlp.topMargin = Ui.dp(24);
         root.addView(main, mlp);
 
-        TextView favoritesHint = Ui.text(this,
-                "Para remover um favorito, selecione o app e segure OK.", 13, Ui.w500, Ui.MUTED);
+        favoritesHint = Ui.text(this,
+                "OK abre o app · Segure OK para opções", 13, Ui.w500, Ui.MUTED);
         favoritesHint.setGravity(Gravity.END);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
         hintLp.topMargin = Ui.dp(12);
@@ -189,8 +209,21 @@ public class HomeActivity extends Activity {
         FrameLayout frame = new FrameLayout(this);
         frame.setClipChildren(false);
         frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        reorderHint = Ui.text(this, "Setas para mover  ·  OK salva  ·  Voltar cancela", 15, Ui.w600, Ui.TEXT);
+        reorderHint.setBackground(Ui.glass(16));
+        reorderHint.setPadding(Ui.dp(18), Ui.dp(10), Ui.dp(18), Ui.dp(10));
+        reorderHint.setElevation(Ui.dp(8));
+        reorderHint.setVisibility(View.GONE);
+        FrameLayout.LayoutParams reorderLp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        reorderLp.topMargin = Ui.dp(76);
+        frame.addView(reorderHint, reorderLp);
         frame.addView(qrPanel(), new FrameLayout.LayoutParams(-1, -1));
         return frame;
+    }
+
+    private void showReorderHint(boolean show) {
+        if (reorderHint != null) reorderHint.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (favoritesHint != null) favoritesHint.setVisibility(show ? View.INVISIBLE : View.VISIBLE);
     }
 
     // ---- QR do controle: aponta a camera do celular e abre o controle ja com o PIN ----
@@ -422,7 +455,7 @@ public class HomeActivity extends Activity {
 
     private void loadFavorites() {
         grid.removeAllViews();
-        List<Apps.Entry> favs = Apps.favorites(this);
+        List<Apps.Entry> favs = reorderFavorites != null ? reorderFavorites : Apps.favorites(this);
         View first = null;
         boolean addShown = false;
         for (int r = 0; r < 2; r++) {
@@ -441,7 +474,7 @@ public class HomeActivity extends Activity {
                     v = new View(this);
                 }
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
-                if (col > 0) lp.leftMargin = Ui.dp(16);
+                if (col > 0) lp.leftMargin = Ui.dp(favoriteGapDp);
                 row.addView(v, lp);
                 if (r == 1 && v.isFocusable() && !dockItems.isEmpty()) {
                     // Cada coluna desce para o item do Dock mais proximo dela.
@@ -450,7 +483,7 @@ public class HomeActivity extends Activity {
                 }
             }
             LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, Ui.dp(60));
-            if (r > 0) rlp.topMargin = Ui.dp(20);
+            if (r > 0) rlp.topMargin = Ui.dp(favoriteRowGapDp);
             grid.addView(row, rlp);
         }
         sizeFavoriteRows();
@@ -463,8 +496,9 @@ public class HomeActivity extends Activity {
 
     private void sizeFavoriteRows() {
         int width = grid.getWidth() - grid.getPaddingLeft() - grid.getPaddingRight();
-        if (width <= Ui.dp(16) * (COLS - 1)) return;
-        int height = Math.round((width - Ui.dp(16) * (COLS - 1)) / (float) COLS * 9f / 16f);
+        int gap = Ui.dp(favoriteGapDp);
+        if (width <= gap * (COLS - 1)) return;
+        int height = Math.round((width - gap * (COLS - 1)) / (float) COLS * 9f / 16f);
         for (int i = 0; i < grid.getChildCount(); i++) {
             View row = grid.getChildAt(i);
             LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) row.getLayoutParams();
@@ -476,6 +510,7 @@ public class HomeActivity extends Activity {
 
     private View tile(final Apps.Entry a) {
         FrameLayout t = new FrameLayout(this);
+        t.setTag(a.pkg);
         t.setContentDescription(a.label);
         t.setBackground(Ui.round(0xFF15161C, 12));
         t.setClipToOutline(true);
@@ -491,19 +526,210 @@ public class HomeActivity extends Activity {
         }
         art.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         t.addView(art, new FrameLayout.LayoutParams(-1, -1));
-        Ui.focusableIcon(t, () -> {
+        boolean moving = a.pkg.equals(movingPkg);
+        if (moving) {
+            t.setClipToOutline(false);
+            t.setClipChildren(false);
+            t.setElevation(Ui.dp(12));
+            art.setBackground(Ui.round(0xFF15161C, 12));
+            art.setClipToOutline(true);
+            int position = reorderFavorites.indexOf(a);
+            int color = Ui.MUTED;
+            GradientDrawable outline = Ui.round(0x00000000, 12);
+            outline.setStroke(Ui.dp(2), color);
+            t.setForeground(outline);
+            if (moveTarget(position, KeyEvent.KEYCODE_DPAD_LEFT, reorderFavorites.size()) >= 0)
+                moveArrow(t, "‹", Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            if (moveTarget(position, KeyEvent.KEYCODE_DPAD_RIGHT, reorderFavorites.size()) >= 0)
+                moveArrow(t, "›", Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            if (moveTarget(position, KeyEvent.KEYCODE_DPAD_UP, reorderFavorites.size()) >= 0)
+                moveArrow(t, "‹", Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+            if (moveTarget(position, KeyEvent.KEYCODE_DPAD_DOWN, reorderFavorites.size()) >= 0)
+                moveArrow(t, "‹", Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        }
+        Ui.focusableIcon(t, moving ? 1.30f : 1f, () -> {
             selKind.setText(Apps.kind(a.pkg));
             selName.setText(a.label);
             App.inst.controller.onScreen(getPackageName(), a.label);
         });
-        t.setOnClickListener(v -> open(Apps.launchIntent(this, a.pkg)));
+        t.setOnClickListener(v -> {
+            if (reorderFavorites != null) finishReorder(true);
+            else open(Apps.launchIntent(this, a.pkg));
+        });
         t.setOnLongClickListener(v -> {
-            Prefs.toggleFav(this, a.pkg);
-            App.inst.controller.hud.message(a.label + " removido dos favoritos");
-            loadFavorites();
+            if (reorderFavorites != null) return true;
+            Ui.appMenu(this, t, a.label,
+                    new String[]{"Reordenar", "Remover da tela inicial"},
+                    new Runnable[]{() -> {
+                        reorderFavorites = new ArrayList<>(Apps.favorites(this));
+                        movingPkg = a.pkg;
+                        showReorderHint(true);
+                        loadFavorites();
+                        focusFavorite(a.pkg);
+                        animateFavoriteSpacing(40, 48);
+                    }, () -> {
+                        Prefs.toggleFav(this, a.pkg);
+                        App.inst.controller.hud.message(a.label + " removido da tela inicial");
+                        loadFavorites();
+                    }});
             return true;
         });
         return t;
+    }
+
+    private void moveArrow(FrameLayout tile, String symbol, int gravity) {
+        TextView arrow = Ui.text(this, symbol, 18, Ui.w700, Ui.TEXT);
+        arrow.setGravity(Gravity.CENTER);
+        if ((gravity & Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP) arrow.setRotation(90);
+        if ((gravity & Gravity.VERTICAL_GRAVITY_MASK) == Gravity.BOTTOM) arrow.setRotation(-90);
+        arrow.setShadowLayer(Ui.dp(2), 0, Ui.dp(1), Ui.dark ? 0xCC000000 : 0xCCFFFFFF);
+        arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Ui.dp(18), Ui.dp(18), gravity);
+        int edge = -Ui.dp(20);
+        if ((gravity & Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.LEFT) lp.leftMargin = edge;
+        if ((gravity & Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT) lp.rightMargin = edge;
+        if ((gravity & Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP) lp.topMargin = edge;
+        if ((gravity & Gravity.VERTICAL_GRAVITY_MASK) == Gravity.BOTTOM) lp.bottomMargin = edge;
+        tile.addView(arrow, lp);
+    }
+
+    private static int moveTarget(int index, int keyCode, int size) {
+        if (index < 0) return -1;
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT)
+            return index % COLS > 0 ? index - 1 : -1;
+        if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
+            return index % COLS < COLS - 1 && index + 1 < size ? index + 1 : -1;
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP)
+            return index >= COLS ? index - COLS : -1;
+        if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
+            return index < COLS && size > COLS ? Math.min(index + COLS, size - 1) : -1;
+        return -1;
+    }
+
+    private void focusFavorite(String pkg) {
+        for (int r = 0; r < grid.getChildCount(); r++) {
+            LinearLayout row = (LinearLayout) grid.getChildAt(r);
+            for (int c = 0; c < row.getChildCount(); c++) {
+                View tile = row.getChildAt(c);
+                if (pkg.equals(tile.getTag())) {
+                    tile.requestFocus();
+                    return;
+                }
+            }
+        }
+    }
+
+    private Map<String, int[]> favoritePositions() {
+        Map<String, int[]> positions = new HashMap<>();
+        for (int r = 0; r < grid.getChildCount(); r++) {
+            LinearLayout row = (LinearLayout) grid.getChildAt(r);
+            for (int c = 0; c < row.getChildCount(); c++) {
+                View tile = row.getChildAt(c);
+                if (tile.getTag() instanceof String) {
+                    int[] location = new int[2];
+                    tile.getLocationOnScreen(location);
+                    positions.put((String) tile.getTag(), location);
+                }
+            }
+        }
+        return positions;
+    }
+
+    private void animateFavorites(Map<String, int[]> previous) {
+        grid.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                grid.getViewTreeObserver().removeOnPreDrawListener(this);
+                for (int r = 0; r < grid.getChildCount(); r++) {
+                    LinearLayout row = (LinearLayout) grid.getChildAt(r);
+                    for (int c = 0; c < row.getChildCount(); c++) {
+                        View tile = row.getChildAt(c);
+                        int[] old = previous.get(tile.getTag());
+                        if (old == null) continue;
+                        int[] now = new int[2];
+                        tile.getLocationOnScreen(now);
+                        tile.setTranslationX(old[0] - now[0]);
+                        tile.setTranslationY(old[1] - now[1]);
+                        tile.animate().translationX(0).translationY(0).setDuration(260)
+                                .setInterpolator(new DecelerateInterpolator()).start();
+                    }
+                }
+                return true;
+            }
+        });
+    }
+
+    private void finishReorder(boolean save) {
+        String pkg = movingPkg;
+        if (save) {
+            List<String> order = new ArrayList<>();
+            for (Apps.Entry entry : reorderFavorites) order.add(entry.pkg);
+            Prefs.reorderFavs(this, order);
+        }
+        reorderFavorites = null;
+        movingPkg = null;
+        showReorderHint(false);
+        loadFavorites();
+        focusFavorite(pkg);
+        animateFavoriteSpacing(16, 20);
+        App.inst.controller.hud.message(save ? "Ordem salva" : "Reordenação cancelada");
+    }
+
+    private void animateFavoriteSpacing(float horizontalDp, float verticalDp) {
+        if (favoriteSpacing != null) favoriteSpacing.cancel();
+        float startX = favoriteGapDp, startY = favoriteRowGapDp;
+        favoriteSpacing = ValueAnimator.ofFloat(0f, 1f);
+        favoriteSpacing.setDuration(300);
+        favoriteSpacing.setInterpolator(new DecelerateInterpolator());
+        favoriteSpacing.addUpdateListener(animation -> {
+            float progress = (float) animation.getAnimatedValue();
+            favoriteGapDp = startX + (horizontalDp - startX) * progress;
+            favoriteRowGapDp = startY + (verticalDp - startY) * progress;
+            for (int r = 0; r < grid.getChildCount(); r++) {
+                LinearLayout row = (LinearLayout) grid.getChildAt(r);
+                LinearLayout.LayoutParams rowLp = (LinearLayout.LayoutParams) row.getLayoutParams();
+                rowLp.topMargin = r == 0 ? 0 : Ui.dp(favoriteRowGapDp);
+                row.setLayoutParams(rowLp);
+                for (int c = 1; c < row.getChildCount(); c++) {
+                    View tile = row.getChildAt(c);
+                    LinearLayout.LayoutParams tileLp = (LinearLayout.LayoutParams) tile.getLayoutParams();
+                    tileLp.leftMargin = Ui.dp(favoriteGapDp);
+                    tile.setLayoutParams(tileLp);
+                }
+            }
+            sizeFavoriteRows();
+        });
+        favoriteSpacing.start();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (reorderFavorites == null) return super.dispatchKeyEvent(event);
+        int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.getAction() == KeyEvent.ACTION_UP) finishReorder(false);
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+            if (event.getAction() == KeyEvent.ACTION_UP) finishReorder(true);
+            return true;
+        }
+        if (keyCode != KeyEvent.KEYCODE_DPAD_LEFT && keyCode != KeyEvent.KEYCODE_DPAD_RIGHT
+                && keyCode != KeyEvent.KEYCODE_DPAD_UP && keyCode != KeyEvent.KEYCODE_DPAD_DOWN)
+            return super.dispatchKeyEvent(event);
+        if (event.getAction() != KeyEvent.ACTION_DOWN || event.getRepeatCount() > 0) return true;
+        int from = -1;
+        for (int i = 0; i < reorderFavorites.size(); i++) {
+            if (reorderFavorites.get(i).pkg.equals(movingPkg)) from = i;
+        }
+        int to = moveTarget(from, keyCode, reorderFavorites.size());
+        if (to >= 0) {
+            Map<String, int[]> previous = favoritePositions();
+            reorderFavorites.add(to, reorderFavorites.remove(from));
+            loadFavorites();
+            focusFavorite(movingPkg);
+            animateFavorites(previous);
+        }
+        return true;
     }
 
     private View addTile() {
