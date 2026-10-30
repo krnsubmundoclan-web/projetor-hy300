@@ -35,7 +35,7 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
-        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar.Fullscreen">
+        android:theme="@style/ProjetorTheme">
 
         <activity
             android:name=".HomeActivity"
