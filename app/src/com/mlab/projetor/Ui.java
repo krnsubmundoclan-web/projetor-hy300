@@ -16,6 +16,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import android.widget.TextView;
 
 import java.util.HashMap;
@@ -229,12 +230,61 @@ final class Ui {
         return v;
     }
 
+    /** Menu contextual dos apps, com as mesmas cores, fonte e foco da tela inicial. */
+    static void appMenu(Context c, View anchor, String title, String[] labels, Runnable[] actions) {
+        LinearLayout panel = col(c);
+        panel.setPadding(dp(12), dp(12), dp(12), dp(12));
+        panel.setClipChildren(false);
+        panel.setClipToPadding(false);
+        GradientDrawable background = round(CARD, 18);
+        background.setStroke(dp(1), GLASS_EDGE);
+        panel.setBackground(background);
+
+        TextView heading = text(c, title, 17, w600, TEXT);
+        heading.setSingleLine(true);
+        heading.setPadding(dp(10), dp(6), dp(10), dp(12));
+        panel.addView(heading);
+
+        PopupWindow popup = new PopupWindow(panel, dp(290), -2, true);
+        popup.setBackgroundDrawable(round(Color.TRANSPARENT, 18));
+        popup.setElevation(dp(12));
+        View first = null;
+        for (int i = 0; i < labels.length; i++) {
+            TextView option = text(c, labels[i], 16, w500, TEXT);
+            option.setGravity(Gravity.CENTER_VERTICAL);
+            option.setPadding(dp(16), 0, dp(12), 0);
+            GradientDrawable row = round(SOFT, 11);
+            option.setBackground(row);
+            focusable(option, row, 1.02f, null);
+            option.setFocusableInTouchMode(true);
+            final Runnable action = actions[i];
+            option.setOnClickListener(v -> {
+                popup.dismiss();
+                action.run();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(52));
+            if (i > 0) lp.topMargin = dp(7);
+            panel.addView(option, lp);
+            if (first == null) first = option;
+        }
+        popup.showAsDropDown(anchor, 0, dp(8), Gravity.START);
+        View firstOption = first;
+        if (firstOption != null) panel.post(firstOption::requestFocus);
+    }
+
     /** Favoritos: o foco muda apenas o tamanho, preservando a arte sem contorno. */
     static void focusableIcon(final View v, final Runnable onFocus) {
+        focusableIcon(v, 1f, onFocus);
+    }
+
+    static void focusableIcon(final View v, final float restScale, final Runnable onFocus) {
         v.setFocusable(true);
         v.setClickable(true);
+        v.setScaleX(restScale);
+        v.setScaleY(restScale);
         v.setOnFocusChangeListener((view, has) -> {
-            view.animate().scaleX(has ? 1.15f : 1f).scaleY(has ? 1.15f : 1f).setDuration(160).start();
+            float scale = has ? Math.max(1.15f, restScale) : restScale;
+            view.animate().scaleX(scale).scaleY(scale).setDuration(160).start();
             if (has && onFocus != null) onFocus.run();
         });
     }

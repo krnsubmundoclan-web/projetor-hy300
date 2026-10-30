@@ -15,7 +15,7 @@ import android.widget.TextView;
 
 import java.util.List;
 
-/** Grade com todos os apps (estilo Launchpad). Segurar OK adiciona/remove dos favoritos. */
+/** Grade com todos os apps (estilo Launchpad). Segurar OK abre a acao de adicionar. */
 public class AppsActivity extends Activity {
     private static final int COLS = 6;
 
@@ -25,11 +25,13 @@ public class AppsActivity extends Activity {
         LinearLayout root = Ui.col(this);
         root.setBackground(Ui.wallpaper(this));
         root.setPadding(Ui.dp(64), Ui.dp(36), Ui.dp(64), 0);
+        root.setClipChildren(false);
+        root.setClipToPadding(false);
 
         TextView title = Ui.text(this, "Todos os apps", 34, Ui.w700, Ui.TEXT);
         title.setLetterSpacing(-0.02f);
         root.addView(title);
-        TextView hint = Ui.text(this, "Segure OK para adicionar ou remover dos favoritos", 15, Ui.w400, Ui.MUTED);
+        TextView hint = Ui.text(this, "OK abre o app · Segure OK para adicionar à tela inicial", 15, Ui.w400, Ui.MUTED);
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-2, -2);
         hlp.topMargin = Ui.dp(8);
         hlp.bottomMargin = Ui.dp(20);
@@ -38,14 +40,14 @@ public class AppsActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setClipChildren(false);
         scroll.setClipToPadding(false);
-        scroll.setPadding(0, Ui.dp(10), 0, Ui.dp(40));
+        scroll.setPadding(Ui.dp(8), Ui.dp(10), Ui.dp(8), Ui.dp(40));
         GridLayout grid = new GridLayout(this);
         grid.setColumnCount(COLS);
         grid.setClipChildren(false);
         scroll.addView(grid);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        int cell = (getResources().getDisplayMetrics().widthPixels - Ui.dp(128) - Ui.dp(16) * (COLS - 1)) / COLS;
+        int cell = (getResources().getDisplayMetrics().widthPixels - Ui.dp(144) - Ui.dp(16) * (COLS - 1)) / COLS;
         List<Apps.Entry> list = Apps.all(this, true);
         for (int i = 0; i < list.size(); i++) {
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
@@ -88,8 +90,18 @@ public class AppsActivity extends Activity {
             }
         });
         c.setOnLongClickListener(v -> {
-            boolean added = Prefs.toggleFav(this, a.pkg);
-            App.inst.controller.hud.message(a.label + (added ? " adicionado aos favoritos" : " removido dos favoritos"));
+            Ui.appMenu(this, c, a.label, new String[]{"Adicionar à tela inicial"}, new Runnable[]{() -> {
+                if (Prefs.favs(this).contains(a.pkg)) {
+                    App.inst.controller.hud.message(a.label + " já está na tela inicial");
+                } else {
+                    List<Apps.Entry> before = Apps.favorites(this);
+                    String replaced = before.size() >= Prefs.MAX_FAVS
+                            ? before.get(before.size() - 1).label : null;
+                    Prefs.toggleFav(this, a.pkg);
+                    App.inst.controller.hud.message(a.label + " adicionado à tela inicial"
+                            + (replaced == null ? "" : " · " + replaced + " saiu para liberar espaço"));
+                }
+            }});
             return true;
         });
         return c;
