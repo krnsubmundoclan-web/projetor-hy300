@@ -45,4 +45,17 @@ final class Net {
         }
         return (b[0] & 0xFF) == 100 && (b[1] & 0xC0) == 64;
     }
+
+    /** MAC de um aparelho da rede pela tabela ARP; null se o sistema nao mostrar. */
+    static String mac(String ip) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader("/proc/net/arp"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                String[] p = line.trim().split("\\s+");
+                if (p.length >= 4 && p[0].equals(ip) && !p[3].equals("00:00:00:00:00:00")) return p[3];
+            }
+        } catch (java.io.IOException | RuntimeException ignored) {
+        }
+        return null;
+    }
 }

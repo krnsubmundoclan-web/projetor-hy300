@@ -1,22 +1,21 @@
 """Monta site/index.html a partir de base.html + body.html, extra.css, extra.js, prompt.txt e o QR do Pix.
-Uso (na raiz do repositorio): python site-fonte/montar.py   (precisa de site/downloads/Projetor.apk para o SHA-256)
+Uso (na raiz do repositorio): python site-fonte/montar.py   (precisa de app/build/ compilado para o SHA-256)
 """
 import hashlib
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(os.path.dirname(HERE), 'site')
-VERSAO = "4.6.4"
+VERSAO = "5.0.0"
 
 
 def read(name):
     return open(os.path.join(HERE, name), encoding='utf-8').read()
 
 
-apk = os.path.join(OUT, 'downloads', 'MS-Projetor-v4.6.3.apk')
-if not os.path.exists(apk):
-    apk = os.path.join(OUT, 'downloads', 'Projetor.apk') # Fallback for local dev
-sha = hashlib.sha256(open(apk, 'rb').read()).hexdigest()
+BUILD = os.path.join(os.path.dirname(HERE), 'app', 'build')
+sha = hashlib.sha256(open(os.path.join(BUILD, 'Projetor-sistema.apk'), 'rb').read()).hexdigest()
+sha_compat = hashlib.sha256(open(os.path.join(BUILD, 'Projetor-compat.apk'), 'rb').read()).hexdigest()
 s = read('base.html')
 desc = 'Tela inicial nova e controle pelo celular para projetores, TV Boxes e Smart TVs. Como instalar, usar e remover.'
 for o, n in [('<title>TÍTULO DA PÁGINA — MLAB</title>', '<title>M Soluction — Projetores, TV Boxes e Smart TVs</title>'),
@@ -32,7 +31,7 @@ a = s.index('<!-- ============ HEADER ============ -->')
 b = s.index('<script>', a)
 body = (read('body.html').replace('__SHA256__', sha).replace('__VERSAO__', VERSAO)
         .replace('__PIXCODE__', read('pix.txt').strip()).replace('__PIXSVG__', read('pix.svg')))
-prompt = read('prompt.txt').replace('__SHA256__', sha)
+prompt = read('prompt.txt').replace('__SHA256__', sha).replace('__SHA256C__', sha_compat)
 assert '</' not in prompt
 s = s[:a] + body + '\n<script type="text/plain" id="prompt-tpl">\n' + prompt + '</script>\n' + s[b:]
 i = s.rindex('</body>')

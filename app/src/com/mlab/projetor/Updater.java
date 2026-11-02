@@ -38,6 +38,8 @@ import java.util.concurrent.Executors;
 final class Updater {
     private static final String TAG = "Projetor";
     static final String VERSION_URL = "https://mlabsoluction.pages.dev/version.json";
+    /** A versao compativel nao instala por cima da de sistema (e vice-versa): cada uma tem sua lista. */
+    static final String VERSION_COMPAT_URL = "https://mlabsoluction.pages.dev/version-compat.json";
     /** So aceita baixar o APK destes enderecos. */
     private static final String[] ALLOWED = {"https://mlabsoluction.pages.dev/", "https://github.com/", "https://objects.githubusercontent.com/"};
     private static final String PUBLIC_KEY =
@@ -100,7 +102,7 @@ final class Updater {
     }
 
     private static Info fetch(Context c) throws Exception {
-        JSONObject j = new JSONObject(new String(get(VERSION_URL, 64 * 1024), StandardCharsets.UTF_8));
+        JSONObject j = new JSONObject(new String(get(Entrada.temSistema(c) ? VERSION_URL : VERSION_COMPAT_URL, 64 * 1024), StandardCharsets.UTF_8));
         Info i = new Info();
         i.code = j.getInt("code");
         i.name = j.getString("name");

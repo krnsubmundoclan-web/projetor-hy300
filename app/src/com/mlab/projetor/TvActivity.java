@@ -35,6 +35,10 @@ public class TvActivity extends Activity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<Iptv.Channel> channels = new ArrayList<>();
+    /** O que a lista mostra: todos os canais ou so os da busca. */
+    private final List<Iptv.Channel> shown = new ArrayList<>();
+    private android.widget.EditText busca;
+    private int versaoListas;
     private VideoView video;
     private LinearLayout panel, pill;
     private ListView list;
@@ -106,6 +110,42 @@ public class TvActivity extends Activity {
         slp.topMargin = Ui.dp(6);
         slp.bottomMargin = Ui.dp(14);
         panel.addView(status, slp);
+
+        LinearLayout barra = Ui.row(this);
+        busca = new android.widget.EditText(this);
+        busca.setHint("Buscar canal");
+        busca.setHintTextColor(0xFF98989D);
+        busca.setTextColor(0xFFFFFFFF);
+        busca.setTextSize(15);
+        busca.setSingleLine(true);
+        busca.setPadding(Ui.dp(14), 0, Ui.dp(14), 0);
+        GradientDrawable bbg = Ui.round(0x26FFFFFF, 12);
+        busca.setBackground(bbg);
+        busca.setOnFocusChangeListener((v, has) -> bbg.setStroke(has ? Ui.dp(2) : 0, 0xFFFFFFFF));
+        busca.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence t, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence t, int a, int b, int c) {}
+            @Override public void afterTextChanged(android.text.Editable e) {
+                filtrar(e.toString());
+            }
+        });
+        barra.addView(busca, new LinearLayout.LayoutParams(0, Ui.dp(44), 1f));
+        LinearLayout listas = Ui.row(this);
+        listas.setGravity(Gravity.CENTER);
+        GradientDrawable lbg = Ui.round(0x26FFFFFF, 12);
+        listas.setBackground(lbg);
+        listas.addView(Ui.text(this, "Listas", 14, Ui.w600, 0xFFFFFFFF));
+        listas.setFocusable(true);
+        listas.setClickable(true);
+        listas.setOnFocusChangeListener((v, has) -> lbg.setStroke(has ? Ui.dp(2) : 0, 0xFFFFFFFF));
+        listas.setOnClickListener(v -> menuListas());
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(Ui.dp(84), Ui.dp(44));
+        llp.leftMargin = Ui.dp(8);
+        barra.addView(listas, llp);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, -2);
+        blp.bottomMargin = Ui.dp(12);
+        panel.addView(barra, blp);
+
         list = new ListView(this);
         list.setDivider(null);
         list.setSelector(Ui.round(0x332C2C2E, 14));
@@ -113,7 +153,7 @@ public class TvActivity extends Activity {
         list.setVerticalScrollBarEnabled(false);
         list.setAdapter(adapter);
         list.setOnItemClickListener((AdapterView<?> p, View v, int pos, long id) -> {
-            play(pos);
+            play(shown.get(pos).pos);
             handler.postDelayed(this::hideList, 900);
         });
         panel.addView(list, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -126,12 +166,12 @@ public class TvActivity extends Activity {
     private final BaseAdapter adapter = new BaseAdapter() {
         @Override
         public int getCount() {
-            return channels.size();
+            return shown.size();
         }
 
         @Override
         public Object getItem(int i) {
-            return channels.get(i);
+            return shown.get(i);
         }
 
         @Override
@@ -159,12 +199,12 @@ public class TvActivity extends Activity {
                 txt.addView(group, glp);
                 row.addView(txt, new LinearLayout.LayoutParams(0, -2, 1f));
             }
-            Iptv.Channel ch = channels.get(i);
-            ((TextView) row.getChildAt(0)).setText(String.valueOf(i + 1));
+            Iptv.Channel ch = shown.get(i);
+            ((TextView) row.getChildAt(0)).setText(String.valueOf(ch.pos + 1));
             LinearLayout txt = (LinearLayout) row.getChildAt(1);
             TextView name = (TextView) txt.getChildAt(0);
             name.setText(ch.name);
-            name.setTextColor(i == current ? Ui.ACCENT_DARK : 0xFFFFFFFF);
+            name.setTextColor(ch.pos == current ? Ui.ACCENT_DARK : 0xFFFFFFFF);
             TextView group = (TextView) txt.getChildAt(1);
             group.setText(ch.group);
             group.setVisibility(ch.group.isEmpty() ? View.GONE : View.VISIBLE);
@@ -172,19 +212,104 @@ public class TvActivity extends Activity {
         }
     };
 
+    /** Mostra so os canais com esse nome; vazio mostra todos. */
+    private void filtrar(String q) {
+        String want = Apps.plain(q).replace(" ", "");
+        shown.clear();
+        for (Iptv.Channel ch : channels) {
+            if (want.isEmpty() || Apps.plain(ch.name).replace(" ", "").contains(want)) shown.add(ch);
+        }
+        adapter.notifyDataSetChanged();
+        if (!channels.isEmpty()) {
+            status.setText(want.isEmpty() ? resumo() : shown.isEmpty() ? "Nenhum canal com esse nome"
+                    : shown.size() + (shown.size() == 1 ? " canal" : " canais"));
+        }
+    }
+
+    private String resumo() {
+        return channels.size() + " canais" + (Iptv.listas(this).isEmpty() ? " abertos · iptv-org" : "");
+    }
+
+    // ---- Listas de canais adicionadas pela pessoa ----
+
+    private android.app.AlertDialog.Builder dialog() {
+        return new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert);
+    }
+
+    private void menuListas() {
+        final List<String> l = Iptv.listas(this);
+        String[] itens = new String[l.size() + 1];
+        itens[0] = "Adicionar lista";
+        for (int i = 0; i < l.size(); i++) itens[i + 1] = "Remover: " + l.get(i);
+        dialog().setTitle("Listas de canais").setItems(itens, (d, w) -> {
+            if (w == 0) {
+                novaLista();
+            } else {
+                Iptv.remover(this, l.get(w - 1));
+                recarregar();
+            }
+        }).show();
+    }
+
+    private void novaLista() {
+        final android.widget.EditText in = new android.widget.EditText(this);
+        in.setHint("http://…");
+        in.setSingleLine(true);
+        in.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(Ui.dp(24), Ui.dp(8), Ui.dp(24), 0);
+        box.addView(in);
+        dialog().setTitle("Adicionar lista")
+                .setMessage("Cole o link de uma lista M3U, até 10 MB. Use só listas que você tem direito de assistir. "
+                        + "Dá para digitar pelo teclado do controle do celular.")
+                .setView(box)
+                .setPositiveButton("Adicionar", (x, y) -> {
+                    final String url = in.getText().toString();
+                    status.setText("Baixando a lista…");
+                    new Thread(() -> {
+                        final String erro = Iptv.adicionar(this, url);
+                        handler.post(() -> {
+                            if (isDestroyed()) return;
+                            App.inst.controller.hud.message(erro != null ? erro : "Lista adicionada");
+                            if (erro == null) recarregar();
+                            else status.setText(resumo());
+                        });
+                    }, "iptv-lista").start();
+                })
+                .setNegativeButton("Cancelar", null).show();
+    }
+
+    /** Lista mudou: recarrega sem trocar o canal que esta passando. */
+    private void recarregar() {
+        versaoListas = Iptv.versao;
+        new Thread(() -> {
+            final List<Iptv.Channel> novos = Iptv.load(this);
+            handler.post(() -> {
+                if (isDestroyed()) return;
+                String tocando = current >= 0 && current < channels.size() ? channels.get(current).url : null;
+                channels.clear();
+                channels.addAll(novos);
+                current = -1;
+                for (Iptv.Channel ch : channels) if (ch.url.equals(tocando)) current = ch.pos;
+                filtrar(busca.getText().toString());
+            });
+        }, "iptv").start();
+    }
+
     private void loadChannels() {
+        versaoListas = Iptv.versao;
         new Thread(() -> {
             List<Iptv.Channel> loaded = Iptv.load(this);
             handler.post(() -> {
                 channels.clear();
                 channels.addAll(loaded);
-                adapter.notifyDataSetChanged();
+                filtrar(busca.getText().toString());
                 if (channels.isEmpty()) {
                     status.setText("Não foi possível carregar os canais. Verifique a internet.");
                     spinner.setVisibility(View.GONE);
                     return;
                 }
-                status.setText(channels.size() + " canais abertos · iptv-org");
+                status.setText(resumo());
                 int start = find(getIntent().getStringExtra(EXTRA_CHANNEL));
                 if (start < 0) start = Math.min(prefs.getInt("tv_canal", -1), channels.size() - 1);
                 if (start >= 0) {
@@ -221,7 +346,7 @@ public class TvActivity extends Activity {
         video.setVideoURI(Uri.parse(ch.url));
         video.start();
         adapter.notifyDataSetChanged();
-        list.setSelection(Math.max(0, i - 3));
+        if (busca.getText().length() == 0) list.setSelection(Math.max(0, i - 3));
         showPill(ch.name, (i + 1) + (ch.group.isEmpty() ? "" : " · " + ch.group));
         App.inst.controller.onScreen(getPackageName(), ch.name);
         App.inst.controller.watch(Apps.TV_PKG, ch.name);
@@ -249,7 +374,7 @@ public class TvActivity extends Activity {
         panel.setAlpha(0f);
         panel.animate().alpha(1f).setDuration(180).start();
         list.requestFocus();
-        if (current >= 0) list.setSelection(current);
+        if (current >= 0 && busca.getText().length() == 0) list.setSelection(current);
     }
 
     private void hideList() {
@@ -265,8 +390,13 @@ public class TvActivity extends Activity {
                 hideList();
                 return true;
             }
-            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && current >= 0) {
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && current >= 0 && list.hasFocus()) {
                 hideList();
+                return true;
+            }
+            // A lista pode ser longa demais para subir ate a busca.
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && list.hasFocus()) {
+                busca.requestFocus();
                 return true;
             }
             return super.onKeyDown(keyCode, event);
@@ -320,6 +450,7 @@ public class TvActivity extends Activity {
     @Override
     protected void onRestart() {
         super.onRestart();
+        if (versaoListas != Iptv.versao) recarregar();
         if (current >= 0) play(current);
     }
 }

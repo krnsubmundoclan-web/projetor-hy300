@@ -1,0 +1,9 @@
+# Cloudflare Pages: site em site/, funcoes em functions/ (contador de downloads e /api/admin).
+name = "mlabsoluction"
+pages_build_output_dir = "site"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "projetor-metricas"
+database_id = "34917789-907c-4cea-8504-107f5f27558e"

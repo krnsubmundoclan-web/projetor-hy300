@@ -18,7 +18,7 @@ final class Prefs {
             "com.espn.score_center",
             Apps.TV_PKG,
     };
-    static final int MAX_FAVS = 8;
+    static final int MAX_FAVS = 16;
 
     private Prefs() {}
 
@@ -39,8 +39,93 @@ final class Prefs {
     /** Sorteia e grava um PIN novo; o anterior deixa de valer na hora. */
     static synchronized String newPin(Context c) {
         String p = String.format(java.util.Locale.ROOT, "%06d", new java.security.SecureRandom().nextInt(1_000_000));
-        sp(c).edit().putString("pin", p).remove("pin_fixo").commit();
+        sp(c).edit().putString("pin", p).remove("pin_fixo").remove("pin_escolhido").commit();
         return p;
+    }
+
+    /** PIN escolhido pela pessoa: fica ate ela trocar. */
+    static synchronized void setPinFixo(Context c, String pin) {
+        sp(c).edit().putString("pin", pin).putBoolean("pin_escolhido", true).commit();
+    }
+
+    static boolean pinFixo(Context c) {
+        return sp(c).getBoolean("pin_escolhido", false);
+    }
+
+    /** Cada indicador da tela inicial; quem nao escolheu ainda segue o ajuste antigo de mostrar todos. */
+    static boolean showRing(Context c, String id) {
+        return sp(c).getBoolean("mostra_" + id, showHardware(c));
+    }
+
+    static void setShowRing(Context c, String id, boolean on) {
+        // Fixa os demais antes de mexer no ajuste geral, do qual eles dependiam.
+        SharedPreferences.Editor e = sp(c).edit();
+        for (String r : new String[]{"temp", "cpu", "ram", "espaco", "internet"}) e.putBoolean("mostra_" + r, showRing(c, r));
+        e.putBoolean("mostra_" + id, on).commit();
+        boolean algum = false;
+        for (String r : new String[]{"temp", "cpu", "ram", "espaco", "internet"}) algum |= showRing(c, r);
+        setShowHardware(c, algum);
+    }
+
+    /** Tela de descanso: indice em Fundo.DESCANSO. */
+    static int descansoModo(Context c) {
+        return sp(c).getInt("descanso_modo", 0);
+    }
+
+    static void setDescanso(Context c, int modo, int cor) {
+        sp(c).edit().putInt("descanso_modo", modo).putInt("descanso_cor", cor).apply();
+    }
+
+    static int descansoCor(Context c) {
+        return sp(c).getInt("descanso_cor", 0);
+    }
+
+    /** A tela de descanso do sistema, guardada uma vez antes de ser trocada. */
+    static String descansoOriginal(Context c) {
+        return sp(c).getString("descanso_original", null);
+    }
+
+    static void salvarDescansoOriginal(Context c, String valor) {
+        if (descansoOriginal(c) == null) sp(c).edit().putString("descanso_original", valor == null ? "" : valor).apply();
+    }
+
+    /** Personalizacao do fundo: cor pronta (indice em Fundo.CORES) e veu sobre a foto. */
+    static int fundoCor(Context c) {
+        return sp(c).getInt("fundo_cor", 0);
+    }
+
+    static void setFundoCor(Context c, int i) {
+        sp(c).edit().putInt("fundo_cor", i).apply();
+    }
+
+    static int fundoEscurecer(Context c) {
+        return sp(c).getInt("fundo_escurecer", 1);
+    }
+
+    static void setFundoEscurecer(Context c, int i) {
+        sp(c).edit().putInt("fundo_escurecer", i).apply();
+    }
+
+    static boolean fusoAjustado(Context c) {
+        return sp(c).getBoolean("fuso_ajustado", false);
+    }
+
+    static void setFusoAjustado(Context c) {
+        sp(c).edit().putBoolean("fuso_ajustado", true).apply();
+    }
+
+    /** Segredo entre o app e o ShellInjetor; sorteado uma vez, fica so nos dados privados do app. */
+    static synchronized String shellToken(Context c) {
+        String t = sp(c).getString("shell_token", null);
+        if (t == null) {
+            byte[] b = new byte[24];
+            new java.security.SecureRandom().nextBytes(b);
+            StringBuilder sb = new StringBuilder();
+            for (byte x : b) sb.append(String.format(java.util.Locale.ROOT, "%02x", x));
+            t = sb.toString();
+            sp(c).edit().putString("shell_token", t).commit();
+        }
+        return t;
     }
 
     /** Tela inicial do fabricante, guardada antes do app assumir (para voltar a ela). */

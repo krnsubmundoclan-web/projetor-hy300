@@ -120,6 +120,10 @@ final class Ui {
      * bem fina por cima. O granulado e um bitmap pequeno gerado uma vez e repetido (barato).
      */
     static Drawable wallpaper(Context c) {
+        Drawable foto = Fundo.foto(c);
+        if (foto != null) return foto;
+        int[] cor = Fundo.gradiente(c);
+        if (cor != null) return Fundo.gradienteDrawable(cor);
         GradientDrawable base = new GradientDrawable(GradientDrawable.Orientation.TL_BR, WALLPAPER);
         GradientDrawable glowA = glow(dark ? 0x804A6CF0 : 0x80A9C1FF, dp(520));
         GradientDrawable glowB = glow(dark ? 0x70A04BD8 : 0x70FFC9A8, dp(560));
@@ -325,5 +329,46 @@ final class Ui {
     static int onColor(int c) {
         double l = (0.2126 * Color.red(c) + 0.7152 * Color.green(c) + 0.0722 * Color.blue(c)) / 255.0;
         return l > 0.62 ? 0xFF1D1D1F : 0xFFFFFFFF;
+    }
+
+    private static final java.util.Map<String, Integer> CORES_LOGO = new java.util.HashMap<>();
+
+    /**
+     * Cor de fundo da logo: a mais comum na borda do icone. Logo recortada (borda transparente)
+     * nao tem fundo proprio, entao vale a cor predominante do desenho.
+     */
+    static int corDaLogo(String pkg, Drawable icon) {
+        Integer c = CORES_LOGO.get(pkg);
+        if (c != null) return c;
+        int n = 48, cor = 0xFF15161C;
+        try {
+            android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(n, n, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(b);
+            icon.setBounds(0, 0, n, n);
+            icon.draw(cv);
+            java.util.Map<Integer, Integer> borda = new java.util.HashMap<>(), todos = new java.util.HashMap<>();
+            for (int y = 0; y < n; y++) {
+                for (int x = 0; x < n; x++) {
+                    int p = b.getPixel(x, y);
+                    if ((p >>> 24) < 200) continue;
+                    int q = p & 0xF0F0F0;
+                    todos.merge(q, 1, Integer::sum);
+                    if (x < 4 || y < 4 || x >= n - 4 || y >= n - 4) borda.merge(q, 1, Integer::sum);
+                }
+            }
+            b.recycle();
+            java.util.Map<Integer, Integer> base = borda.size() > 0 ? borda : todos;
+            int melhor = -1;
+            for (java.util.Map.Entry<Integer, Integer> e : base.entrySet()) {
+                if (e.getValue() > melhor) {
+                    melhor = e.getValue();
+                    cor = 0xFF000000 | e.getKey() | 0x080808;
+                }
+            }
+        } catch (RuntimeException e) {
+            // Icone com defeito fica com o fundo neutro.
+        }
+        CORES_LOGO.put(pkg, cor);
+        return cor;
     }
 }

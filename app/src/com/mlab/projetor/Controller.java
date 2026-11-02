@@ -1,7 +1,6 @@
 package com.mlab.projetor;
 
 import android.app.ActivityManager;
-import android.app.Instrumentation;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -16,9 +15,7 @@ import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
-import android.view.InputDevice;
 import android.view.KeyEvent;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.MimeTypeMap;
@@ -33,14 +30,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Executa os comandos vindos do celular. Teclas e toques sao injetados com
- * INJECT_EVENTS (concedido por sermos app de sistema), sempre fora da main thread.
+ * Executa os comandos vindos do celular. Teclas e toques passam pela Entrada, que escolhe o
+ * caminho disponivel neste aparelho, sempre fora da main thread.
  */
 final class Controller {
     private static final String TAG = "Projetor";
 
     private static final Map<String, Integer> KEYS = new HashMap<>();
-    private static final Map<String, String> ALIASES = new HashMap<>();
+    private static final Map<String, String[]> ALIASES = new HashMap<>();
 
     static {
         KEYS.put("up", KeyEvent.KEYCODE_DPAD_UP);
@@ -65,18 +62,19 @@ final class Controller {
         KEYS.put("sleep", KeyEvent.KEYCODE_SLEEP);
         KEYS.put("wake", KeyEvent.KEYCODE_WAKEUP);
 
-        ALIASES.put("youtube", "com.google.android.youtube.tv");
-        ALIASES.put("netflix", "com.netflix.mediaclient");
-        ALIASES.put("disney", "com.disney.disneyplus");
-        ALIASES.put("prime", "com.amazon.amazonvideo.livingroom");
-        ALIASES.put("globoplay", "com.globo.globotv");
-        ALIASES.put("spotify", "com.spotify.tv.android");
-        ALIASES.put("espn", "com.espn.score_center");
-        ALIASES.put("navegador", "com.tcl.browser");
+        // Versao de TV primeiro; varios aparelhos so tem a de celular.
+        ALIASES.put("youtube", new String[]{"com.google.android.youtube.tv", "com.google.android.youtube"});
+        ALIASES.put("netflix", new String[]{"com.netflix.ninja", "com.netflix.mediaclient"});
+        ALIASES.put("disney", new String[]{"com.disney.disneyplus"});
+        ALIASES.put("prime", new String[]{"com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient"});
+        ALIASES.put("globoplay", new String[]{"com.globo.globotv"});
+        ALIASES.put("spotify", new String[]{"com.spotify.tv.android", "com.spotify.music"});
+        ALIASES.put("espn", new String[]{"com.espn.score_center"});
+        ALIASES.put("navegador", new String[]{"com.tcl.browser", "com.android.chrome"});
     }
 
     private final Context ctx;
-    private final Instrumentation inst = new Instrumentation();
+    final Entrada entrada;
     private final ExecutorService queue = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AudioManager audio;
@@ -118,8 +116,8 @@ final class Controller {
         @Override
         public void doFrame(long now) {
             if (!joyRunning) return;
-            // Sem noticias do celular por 0,4 s (rede caiu, app fechou): para a seta.
-            if (SystemClock.uptimeMillis() - joyLastMsg > 400) {
+            // Sem noticias do celular por 0,7 s (rede caiu, app fechou): para a seta.
+            if (SystemClock.uptimeMillis() - joyLastMsg > 700) {
                 stopJoystick();
                 return;
             }
@@ -135,6 +133,7 @@ final class Controller {
         audio = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
         wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
         hud = new Hud(ctx);
+        entrada = new Entrada(ctx);
         DisplayMetrics dm = new DisplayMetrics();
         wm.getDefaultDisplay().getRealMetrics(dm);
         sw = dm.widthPixels;
@@ -147,6 +146,11 @@ final class Controller {
     void command(String msg) {
         try {
             if (msg.startsWith("k:")) key(msg.substring(2));
+            else if (msg.equals("cur:1")) main.post(() -> applyMove(0, 0));
+            else if (msg.equals("cur:0")) main.post(() -> {
+                main.removeCallbacks(hideCursor);
+                removeCursor();
+            });
             else if (msg.startsWith("m:")) {
                 String[] p = msg.substring(2).split(",");
                 move(Float.parseFloat(p[0]), Float.parseFloat(p[1]));
@@ -178,53 +182,69 @@ final class Controller {
             case "mute":
                 volume("mute");
                 return true;
+            case "abertos":
+                abrirAbertos();
+                return true;
         }
         Integer code = KEYS.get(name);
         if (code == null) return false;
         final int k = code;
         if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER) onSelect();
+        if (touchNav(k)) return true;
         queue.execute(() -> {
-            try {
-                sendRemoteKey(k);
-            } catch (Throwable e) {
-                Log.w(TAG, "falha ao injetar tecla " + k, e);
-            }
+            if (!entrada.tecla(k)) avisarLimite();
         });
         return true;
     }
 
-    private int remoteDeviceId = Integer.MIN_VALUE;
-
-    /** Id do controle remoto fisico (teclado com direcional); sem ele, o teclado virtual. */
-    private int remoteDevice() {
-        if (remoteDeviceId != Integer.MIN_VALUE) return remoteDeviceId;
-        int found = android.view.KeyCharacterMap.VIRTUAL_KEYBOARD;
-        for (int id : InputDevice.getDeviceIds()) {
-            InputDevice d = InputDevice.getDevice(id);
-            if (d != null && !d.isVirtual() && (d.getSources() & InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD) {
-                found = id;
-                break;
-            }
-        }
-        remoteDeviceId = found;
-        return found;
+    /** Janela lateral de apps abertos: abre por cima do que estiver na tela; de novo, fecha. */
+    void abrirAbertos() {
+        main.post(() -> {
+            AbertosActivity a = AbertosActivity.aberta;
+            if (a != null) a.finish();
+            else start(new Intent(ctx, AbertosActivity.class));
+        });
     }
 
-    /**
-     * Injeta a tecla como se viesse do controle remoto (dispositivo real).
-     * Setas e OK saem com origem so "direcional": a Netflix ignora setas que chegam como
-     * "teclado" ou "teclado + direcional" (testado no HY300: so SOURCE_DPAD move a selecao).
-     */
-    private void sendRemoteKey(int code) {
-        int dev = remoteDevice();
-        boolean dpad = code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN
-                || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
-                || code == KeyEvent.KEYCODE_DPAD_CENTER;
-        int src = dpad ? InputDevice.SOURCE_DPAD : InputDevice.SOURCE_KEYBOARD;
-        long down = SystemClock.uptimeMillis();
-        inst.sendKeySync(new KeyEvent(down, down, KeyEvent.ACTION_DOWN, code, 0, 0, dev, 0, KeyEvent.FLAG_FROM_SYSTEM, src));
-        inst.sendKeySync(new KeyEvent(down, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0, 0, dev, 0,
-                KeyEvent.FLAG_FROM_SYSTEM, src));
+    private long lastLimitNotice;
+
+    private void avisarLimite() {
+        long now = SystemClock.uptimeMillis();
+        if (now - lastLimitNotice < 15_000) return;
+        lastLimitNotice = now;
+        hud.message("Controle limitado: veja Ajustes > Estado do controle");
+    }
+
+    /** App de celular que ignora setas (a Netflix do HY300): setas viram arrastos e OK vira toque. */
+    private boolean touchNav(int k) {
+        if (!TOUCH_NAV.equals(currentPkg())) return false;
+        final float y = cursorVisible ? cy : sh / 2f, x = cursorVisible ? cx : sw / 2f;
+        int v = Ui.dp(220), h = Ui.dp(300);
+        switch (k) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+                drag(sw / 2f, sh / 2f, sw / 2f, sh / 2f + v);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                drag(sw / 2f, sh / 2f, sw / 2f, sh / 2f - v);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                drag(x, y, clamp(x + h, 1, sw - 2), y);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                drag(x, y, clamp(x - h, 1, sw - 2), y);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+                click(false);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void drag(final float x0, final float y0, final float x1, final float y1) {
+        queue.execute(() -> {
+            if (!entrada.arrasto(x0, y0, x1, y1)) avisarLimite();
+        });
     }
 
     // Volume vindo do celular: sem a barra do sistema (FLAG_SHOW_UI); quem mostra e o nosso aviso.
@@ -293,8 +313,9 @@ final class Controller {
             if (!ensureCursor()) return;
             cx = clamp(cx + dx, 0, sw - 1);
             float ny = cy + dy;
-            String prof = profile(screenPkg);
-            if ((ny > sh - 1 || ny < 0) && ("web".equals(prof) || "toque".equals(prof))) {
+            boolean atEdge = ny > sh - 1 || ny < 0;
+            String prof = atEdge ? profile(currentPkg()) : "";
+            if (atEdge && ("web".equals(prof) || "toque".equals(prof))) {
                 // Cursor encostado na borda (so em navegador): empurrar com vontade rola a pagina,
                 // no maximo uma vez a cada 0,7 s, para nao "descer sem parar".
                 edgePush += ny > sh - 1 ? ny - (sh - 1) : ny;
@@ -312,24 +333,26 @@ final class Controller {
             cursor.setTranslationY(cy);
             cursorVisible = true;
             main.removeCallbacks(hideCursor);
-            main.postDelayed(hideCursor, 8000);
+            main.postDelayed(hideCursor, CURSOR_MS);
         }
     }
 
     void click(final boolean longPress) {
         if (!cursorVisible) {
-            // Sem cursor na tela, "clique" no touchpad vira OK do controle.
-            key("ok");
-            return;
+            String prof = profile(currentPkg());
+            if (!"toque".equals(prof) && !"web".equals(prof)) {
+                // Sem cursor na tela, "clique" no touchpad vira OK do controle.
+                key("ok");
+                return;
+            }
+            // App de toque nao tem OK: a seta some parada, mas o clique continua valendo onde ela estava.
+            main.post(() -> applyMove(0, 0));
         }
         final float x = cx, y = cy;
         main.removeCallbacks(hideCursor);
-        main.postDelayed(hideCursor, 8000);
+        main.postDelayed(hideCursor, CURSOR_MS);
         queue.execute(() -> {
-            long t = SystemClock.uptimeMillis();
-            touch(t, t, MotionEvent.ACTION_DOWN, x, y);
-            SystemClock.sleep(longPress ? 700 : 40);
-            touch(t, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, y);
+            if (!entrada.toque(x, y, longPress)) avisarLimite();
         });
     }
 
@@ -340,28 +363,7 @@ final class Controller {
 
     /** Arrasto vertical de dy pixels comecando em (x, y0); dy negativo faz a pagina descer. */
     private void scrollFrom(final float x, final float y0, final float dy) {
-        final float y1 = clamp(y0 + dy, 1, sh - 2);
-        queue.execute(() -> {
-            long t = SystemClock.uptimeMillis();
-            touch(t, t, MotionEvent.ACTION_DOWN, x, y0);
-            for (int i = 1; i <= 8; i++) {
-                SystemClock.sleep(12);
-                touch(t, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x, y0 + (y1 - y0) * i / 8f);
-            }
-            touch(t, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, y1);
-        });
-    }
-
-    private void touch(long down, long when, int action, float x, float y) {
-        MotionEvent e = MotionEvent.obtain(down, when, action, x, y, 0);
-        e.setSource(InputDevice.SOURCE_TOUCHSCREEN);
-        try {
-            inst.sendPointerSync(e);
-        } catch (Throwable ex) {
-            Log.w(TAG, "falha ao injetar toque", ex);
-        } finally {
-            e.recycle();
-        }
+        drag(x, y0, x, clamp(y0 + dy, 1, sh - 2));
     }
 
     private boolean ensureCursor() {
@@ -394,6 +396,9 @@ final class Controller {
         }
     }
 
+    private static final long CURSOR_MS = 30_000;
+    private static final String TOUCH_NAV = "com.netflix.mediaclient";
+
     private static float clamp(float v, float lo, float hi) {
         return Math.max(lo, Math.min(hi, v));
     }
@@ -408,11 +413,7 @@ final class Controller {
                 .replaceAll("[^\\x20-\\x7E]", "");
         if (plain.isEmpty()) return;
         queue.execute(() -> {
-            try {
-                inst.sendStringSync(plain);
-            } catch (Throwable e) {
-                Log.w(TAG, "falha ao digitar", e);
-            }
+            if (!entrada.texto(plain)) avisarLimite();
         });
     }
 
@@ -430,14 +431,11 @@ final class Controller {
                 return start(new Intent(Intent.ACTION_MAIN).setComponent(
                         new ComponentName("com.android.tv.settings", "com.android.tv.settings.MainSettings")));
             case "keystone":
-                return start(new Intent(Intent.ACTION_MAIN).setComponent(
-                        new ComponentName("com.telanda.keystone", "com.telanda.keystone.MainActivity")));
+                return start(Hardware.findAvailable(ctx, Hardware.getKeystoneIntents(Hardware.detectChipset())));
             case "imagem":
-                return start(new Intent(Intent.ACTION_MAIN).setComponent(
-                        new ComponentName("com.gls.Gsettings", "com.gls.Gsettings.MainActivity")));
+                return start(Hardware.findAvailable(ctx, Hardware.getImageAdjustmentIntents(Hardware.detectChipset())));
             case "hdmi":
-                return start(new Intent(Intent.ACTION_MAIN).setComponent(
-                        new ComponentName("com.softwinner.awsource", "com.softwinner.awsource.MainActivity")));
+                return start(Hardware.findAvailable(ctx, Hardware.getHdmiIntents(Hardware.detectChipset())));
             case "tv":
             case "tv ao vivo":
             case "televisao":
@@ -448,11 +446,19 @@ final class Controller {
             case "bluetooth":
                 return start(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
         }
-        String pkg = ALIASES.get(n.replace(" ", ""));
+        String pkg = installedAlias(n.replace(" ", ""));
         if (pkg == null && name.contains(".")) pkg = name.trim();
         if (pkg == null) pkg = Apps.findByName(ctx, name);
         if (pkg == null) return false;
         return start(Apps.launchIntent(ctx, pkg));
+    }
+
+    /** A versao instalada de um app conhecido ("netflix"), ou null. */
+    String installedAlias(String alias) {
+        String[] pkgs = ALIASES.get(alias);
+        if (pkgs == null) return null;
+        for (String p : pkgs) if (Apps.launchIntent(ctx, p) != null) return p;
+        return null;
     }
 
     /** Abre a TV ao vivo ja no canal pedido ("globo", "cultura"). */
@@ -475,8 +481,8 @@ final class Controller {
         if (!scheme.equals("http") && !scheme.equals("https")) return false;
         String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
         String pkg = null;
-        if (host.endsWith("youtube.com") || host.equals("youtu.be")) pkg = "com.google.android.youtube.tv";
-        else if (host.endsWith("netflix.com")) pkg = "com.netflix.mediaclient";
+        if (host.endsWith("youtube.com") || host.equals("youtu.be")) pkg = installedAlias("youtube");
+        else if (host.endsWith("netflix.com")) pkg = installedAlias("netflix");
         Intent i = new Intent(Intent.ACTION_VIEW, uri);
         if (pkg != null) {
             i.setPackage(pkg);
@@ -614,8 +620,9 @@ final class Controller {
      * celular sem versao de TV, ex.: a Netflix de celular que vem no HY300: so anda com cursor) ou geral.
      */
     static String profile(String pkg) {
-        if ("com.mlab.projetor".equals(pkg) && TvActivity.visible) return "video";
-        if (pkg == null || pkg.isEmpty() || pkg.equals("com.mlab.projetor")) return "inicio";
+        String self = App.inst.getPackageName();
+        if (self.equals(pkg) && TvActivity.visible) return "video";
+        if (pkg == null || pkg.isEmpty() || pkg.equals(self)) return "inicio";
         if (pkg.contains("browser") || pkg.contains("chrome") || pkg.contains("webview")) return "web";
         if (touchOnly(pkg)) return "toque";
         if (pkg.contains("youtube") || pkg.contains("netflix") || pkg.contains("disney") || pkg.contains("amazonvideo")
@@ -658,6 +665,8 @@ final class Controller {
      * ficava parado na tela inicial.
      */
     private String currentPkg() {
+        // Sem permissao de sistema a lista so traz o proprio app; ai vale o que a acessibilidade viu.
+        if (!Entrada.temSistema(ctx)) return screenPkg;
         try {
             ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
             @SuppressWarnings("deprecation")
@@ -671,7 +680,7 @@ final class Controller {
     private String screenJson() {
         String pkg = currentPkg();
         Apps.Entry e = pkg.isEmpty() ? null : Apps.entry(ctx, pkg);
-        String name = pkg.equals("com.mlab.projetor") ? (TvActivity.visible ? "TV ao vivo" : "Tela inicial")
+        String name = pkg.equals(ctx.getPackageName()) ? (TvActivity.visible ? "TV ao vivo" : "Tela inicial")
                 : e != null ? e.label : pkg;
         return "{\"tipo\":\"tela\",\"app\":" + Json.str(pkg)
                 + ",\"nome\":" + Json.str(name)
@@ -688,6 +697,7 @@ final class Controller {
         return "{\"ok\":true," + screen.substring(1, screen.length() - 1)
                 + ",\"volume\":" + Math.round(vol * 100f / Math.max(1, max))
                 + ",\"mudo\":" + audio.isStreamMute(AudioManager.STREAM_MUSIC)
+                + ",\"entrada\":" + Json.str(entrada.modo())
                 + ",\"escuro\":" + Ui.dark + "}";
     }
 

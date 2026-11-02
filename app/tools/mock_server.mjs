@@ -35,6 +35,12 @@ createServer((req, res) => {
   }
   if (url.pathname === '/font.ttf') return res.end(readFileSync(join(root, 'fonts/Inter.ttf')));
   if (url.pathname === '/icon.png') { res.writeHead(200, { 'content-type': 'image/png' }); return res.end(readFileSync(join(root, 'web/icon.png'))); }
+  if (url.pathname === '/api/ola') return json({ ok: true, token: null });
+  if (url.pathname === '/api/aparelho/salvar') return json({ ok: true, token: 'd' + '0'.repeat(48) });
+  if (url.pathname === '/api/listas') return json({ ok: true, listas: [] });
+  if (url.pathname === '/api/transmitir') return json({ ok: true, lista: ['iPhone, iPad e Mac (AirPlay)', 'Android e Windows (Miracast)'] });
+  if (url.pathname === '/api/personalizar') return json({ ok: true, foto: false, cor: 0, cores: ['Padrão', 'Grafite', 'Azul-noite', 'Vinho', 'Verde-floresta', 'Preto'], escurecer: 1, escurecerOp: ['Leve', 'Médio', 'Forte'], descanso: 1, descansoCor: 0, descansoOp: ['Padrão do sistema', 'Igual ao fundo', 'Outra foto', 'Cor sólida'],
+    aneis: [['temp', 'Temperatura'], ['cpu', 'CPU'], ['ram', 'RAM'], ['espaco', 'Espaço'], ['internet', 'Internet']].map(([id, nome]) => ({ id, nome, on: true })) });
   if (url.pathname === '/api/ping') return json({ ok: true, auth: true });
   if (url.pathname === '/api/state') return json({ ok: true, tipo: 'tela', app: 'com.netflix.mediaclient', nome: 'Netflix', perfil: 'video', foco: 'Stranger Things', volume: 64, mudo: false, escuro: true });
   if (url.pathname === '/api/apps') return json(apps);

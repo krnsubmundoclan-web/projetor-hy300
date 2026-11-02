@@ -72,7 +72,11 @@ public class App extends Application {
         inst = this;
         // Permite abrir arquivos enviados pelo celular com Uri file:// nos players do sistema.
         StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder().build());
+        // O firmware vem em ingles e o relogio da tela inicial usa o idioma padrao.
+        java.util.Locale.setDefault(new java.util.Locale("pt", "BR"));
+        Prefs.setDark(this, true);
         Ui.init(this);
+        fusoInicial();
         if (Prefs.netflixFix(this)) applyNetflixFix();
         takeOverSystemUi();
         // Instalado direto no projetor (sem o instalar.bat): vira a tela inicial na primeira vez.
@@ -83,7 +87,26 @@ public class App extends Application {
         server = new WebServer(this, controller, ControlService.PORT);
         server.start();
         startKeepAlive();
+        Provisao.iniciar(this, controller.entrada, controller.hud);
         Updater.schedule(this);
+    }
+
+    /**
+     * Estes firmwares saem de fabrica no fuso de Los Angeles e nao acertam sozinhos sem chip: uma
+     * vez, troca o fuso padrao de fabrica pelo de Brasilia. Depois disso vale o que a pessoa escolher.
+     */
+    private void fusoInicial() {
+        if (Prefs.fusoAjustado(this)) return;
+        String id = java.util.TimeZone.getDefault().getID();
+        if (id.equals("America/Los_Angeles") || id.equals("GMT") || id.equals("UTC") || id.equals("Etc/UTC")) {
+            try {
+                getSystemService(android.app.AlarmManager.class).setTimeZone("America/Sao_Paulo");
+            } catch (RuntimeException e) {
+                Log.i("Projetor", "sem permissao para ajustar o fuso");
+                return;
+            }
+        }
+        Prefs.setFusoAjustado(this);
     }
 
     /**
@@ -105,7 +128,9 @@ public class App extends Application {
      * - desliga o "modo mouse" do com.sxk.testdsndpi (avisos "enter/exit mouse");
      * - liga o KeyService, que mostra o volume do controle fisico no aviso do app.
      */
-    private void takeOverSystemUi() {
+    void takeOverSystemUi() {
+        if (getPackageName().endsWith(".teste")) return; // roda ao lado do app instalado
+        if (checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) return;
         if (!saveSystemState()) return;
         try {
             getPackageManager().setComponentEnabledSetting(
@@ -159,6 +184,10 @@ public class App extends Application {
      */
     void startKeepAlive() {
         Intent i = new Intent(this, ControlService.class);
+        if (android.os.Process.myUid() != android.os.Process.SYSTEM_UID) {
+            startForegroundService(i);
+            return;
+        }
         try {
             UserHandle user = UserHandle.getUserHandleForUid(0);
             getClass().getMethod("startForegroundServiceAsUser", Intent.class, UserHandle.class)

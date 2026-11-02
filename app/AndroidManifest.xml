@@ -1,28 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- App universal: funciona como usuario padrao (sem sharedUserId) para compatibilidade com HY320, TV Boxes, etc. -->
+<!-- Base das duas versoes (o build.sh gera cada uma):
+     sistema: uid de sistema, so instala em firmware assinado com a chave de teste do AOSP (HY300).
+     compat: sem uid de sistema, instala em qualquer Android; os blocos SISTEMA saem. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.mlab.projetor"
-    android:versionCode="57"
-    android:versionName="4.6.16-RESTORED">
+    android:sharedUserId="android.uid.system"
+    android:versionCode="60"
+    android:versionName="5.0.0">
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
-    <!-- INJECT_EVENTS removido: exige assinatura de sistema. O controle usara fallback ou ADB se disponivel. -->
-    <!-- <uses-permission android:name="android.permission.INJECT_EVENTS"/> -->
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-    <uses-permission android:name="android.permission.REAL_GET_TASKS"/>
-    <!-- WRITE_SECURE_SETTINGS removido: exige sistema. -->
-    <!-- <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/> -->
-    <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
-    <!-- INSTALL/DELETE_PACKAGES removidos: exigem sistema. Atualizacoes serao manuais ou via instalador externo. -->
-    <!-- <uses-permission android:name="android.permission.INSTALL_PACKAGES"/> -->
-    <!-- <uses-permission android:name="android.permission.DELETE_PACKAGES"/> -->
+    <!-- Na compat, concedida pelo ADB local (Provisao). -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
+    <!-- SISTEMA-INICIO -->
+    <uses-permission android:name="android.permission.INJECT_EVENTS"/>
+    <uses-permission android:name="android.permission.SET_TIME_ZONE"/>
+    <uses-permission android:name="android.permission.REAL_GET_TASKS"/>
+    <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES"/>
+    <uses-permission android:name="android.permission.DELETE_PACKAGES"/>
+    <!-- SISTEMA-FIM -->
+    <!-- COMPAT-INICIO
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES"/>
+    COMPAT-FIM -->
 
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
@@ -40,7 +49,6 @@
         <activity
             android:name=".HomeActivity"
             android:exported="true"
-            android:directBootAware="true"
             android:launchMode="singleTask"
             android:stateNotNeeded="true"
             android:excludeFromRecents="true"
@@ -65,14 +73,52 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode"/>
 
         <activity
+            android:name=".AbertosActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode"/>
+
+        <activity
+            android:name=".ControleActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustPan"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode"/>
+
+        <activity
+            android:name=".PersonalizarActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode"/>
+
+        <activity
             android:name=".TvActivity"
             android:exported="false"
+            android:windowSoftInputMode="adjustNothing"
             android:screenOrientation="landscape"
             android:launchMode="singleTask"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode"/>
 
         <service android:name=".ControlService" android:exported="false"/>
+
+        <service
+            android:name=".Descanso"
+            android:exported="true"
+            android:label="M SOLUCTION"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </service>
 
         <service
             android:name=".KeyService"
@@ -85,7 +131,7 @@
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/key_service"/>
         </service>
 
-        <receiver android:name=".BootReceiver" android:exported="true" android:directBootAware="true">
+        <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>

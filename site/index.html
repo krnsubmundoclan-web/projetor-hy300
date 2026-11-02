@@ -517,7 +517,7 @@ code{font-family:var(--font-mono);font-size:.9em}
         <div class="tabs__panel" role="tabpanel" id="p-celular" aria-labelledby="tab-celular">
           <div class="method-head">
             <p class="muted">Pelo celular, no mesmo Wi‑Fi do projetor</p>
-            <a href="downloads/MS-Instalador-V11-RESTORED.apk" class="btn btn--ghost" download>Baixar instalador (v4.6.16 - Inteligente)</a>
+            <a href="/app" class="btn btn--ghost">Baixar instalador</a>
           </div>
           <ol class="steps steps--phones">
             <li class="step"><div class="step__text"><h3>Abra e toque em Procurar</h3><p class="subtle">Antes, <a href="#adb" data-open-adb>ligue o ADB no projetor</a>. Se o Android pedir, permita instalar desta fonte</p></div><figure class="phone" aria-label="Ilustração da tela do instalador"><div class="phone__screen"><p class="ph-t">Instalar o Projetor</p><p class="ph-s">Tela nova e controle pelo celular</p><div class="ph-step"><span>1</span>Mesmo Wi‑Fi</div><div class="ph-step"><span>2</span>Depuração USB ligada</div><div class="ph-btn">Procurar projetor</div><p class="ph-s ph-s--sm">Ou digite o IP</p><div class="ph-input">192.168.0.20</div><div class="ph-btn ph-btn--ghost">Conectar</div></div></figure></li>
@@ -542,7 +542,7 @@ code{font-family:var(--font-mono);font-size:.9em}
             </div></li>
             <li class="step"><div class="step__text"><h3>Confirme quando pedir</h3><p class="subtle">No projetor, aceite "Permitir depuração?"</p></div></li>
           </ol>
-          <p class="subtle" style="margin-top:var(--s-4)">Sem IA: <a href="downloads/projetor-kit-pc.zip" download>kit para Windows</a></p>
+          <p class="subtle" style="margin-top:var(--s-4)">Sem IA: <a href="/kit">kit para Windows</a></p>
         </div>
       </div>
 
@@ -625,7 +625,7 @@ code{font-family:var(--font-mono);font-size:.9em}
       <h2 data-reveal>Voltar ao original</h2>
       <ol class="steps">
         <li class="step">
-          <div class="step__text"><h3>Ajustes → Voltar à tela original</h3></div>
+          <div class="step__text"><h3>Ajustes → Resetar ao original de fábrica</h3></div>
           <figure class="shot"><img src="passos/08-menu-ajustes.webp" width="1280" height="720" loading="lazy" alt="Menu Ajustes"></figure>
         </li>
         <li class="step">
@@ -691,13 +691,14 @@ code{font-family:var(--font-mono);font-size:.9em}
       </nav>
       <div class="foot__col">
         <p class="badge">Downloads</p>
-        <a href="downloads/MS-Projetor-NUCLEAR-FIX.apk" download>MS Projetor · v4.6.16 (Compat)</a>
-        <a href="downloads/MS-Instalador-V11-RESTORED.apk" download>Instalador Inteligente · v4.6.16</a>
-        <a href="downloads/projetor-kit-pc.zip" download>Kit para Windows</a>
+        <a href="/apk">Projetor · v5.0.0</a>
+        <a href="/apk-compat">Projetor compatível · v5.0.0</a>
+        <a href="/app">Instalador · v5.0.0</a>
+        <a href="/kit">Kit para Windows</a>
         <a href="https://github.com/krnsubmundoclan-web/projetor-hy300" target="_blank" rel="noopener">Código no GitHub ↗</a>
       </div>
     </div>
-    <details class="foot__hash"><summary>Conferir o arquivo (SHA-256)</summary><code>9bd35e1676076c25aa6950333602eb1855604847ff9c370e156205a0fd0dd9dc</code></details>
+    <details class="foot__hash"><summary>Conferir o arquivo (SHA-256)</summary><code>37014e7c9d78b0ff248003e748eca9346aab82112a81016f3e067ae059ba06f7</code></details>
     <div class="footer__bottom">
       <span>&copy; <span data-year></span> MLAB SOLUCTION</span>
       <span>Sem vínculo com os fabricantes · Sem garantia</span>
@@ -711,11 +712,11 @@ Quero instalar o app "Projetor" no meu projetor Android (HY300 ou parecido), que
 
 1. Veja se o ADB (Android Platform Tools) está instalado. Se não estiver, peça permissão e baixe somente do site oficial do Google: https://dl.google.com/android/repository/platform-tools-latest-<windows|darwin|linux>.zip (use a versão do meu sistema).
 2. Encontre o projetor: procure na rede local aparelhos com a porta 5555 aberta, conecte com "adb connect IP:5555" e me mostre o modelo (getprop ro.product.model), o fabricante e a versão do Android. Se houver mais de um, pergunte qual é o meu. Se o estado ficar "unauthorized", me peça para aceitar o aviso "Permitir depuração" na tela do projetor com o controle.
-3. Baixe o app do repositório oficial no GitHub (https://github.com/krnsubmundoclan-web/projetor-hy300), versão 4.5.3: https://github.com/krnsubmundoclan-web/projetor-hy300/releases/download/v4.5.3/Projetor.apk (se não conseguir, use __ORIGEM__/downloads/Projetor.apk). Confira o SHA-256: ele precisa ser 9bd35e1676076c25aa6950333602eb1855604847ff9c370e156205a0fd0dd9dc. Se for diferente, pare e me avise.
+3. Baixe o app do repositório oficial no GitHub (https://github.com/krnsubmundoclan-web/projetor-hy300), versão 5.0.0: https://github.com/krnsubmundoclan-web/projetor-hy300/releases/download/v5.0.0/Projetor.apk . Confira o SHA-256: ele precisa ser 37014e7c9d78b0ff248003e748eca9346aab82112a81016f3e067ae059ba06f7. Se for diferente, pare e me avise.
 4. Antes de instalar, anote e me mostre como o projetor está: a tela inicial padrão (cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME) e a configuração enabled_accessibility_services.
-5. Instale com "adb install -r Projetor.apk". Se aparecer INSTALL_FAILED_SHARED_USER_INCOMPATIBLE, me explique que o sistema deste projetor não é compatível com o app, pare e não altere mais nada.
-6. Se instalar, abra o app com "adb shell am start -n com.mlab.projetor/.HomeActivity". Ele se define sozinho como tela inicial e desliga o modo mouse do fabricante. Confirme que a tela inicial padrão agora é com.mlab.projetor e me diga que o controle pelo celular aparece no botão "Celular" da tela do projetor.
-7. No final, pergunte se pode desligar o acesso ADB ("adb shell settings put global adb_enabled 0") e explique que isso deixa o projetor mais seguro. Para remover o app no futuro, não precisa de computador: Ajustes → "Voltar à tela original e remover o app", na tela do projetor.
+5. Instale com "adb install -r Projetor.apk". Se aparecer INSTALL_FAILED_SHARED_USER_INCOMPATIBLE, me explique que este projetor precisa da versão compatível, baixe https://github.com/krnsubmundoclan-web/projetor-hy300/releases/download/v5.0.0/Projetor-compat.apk , confira o SHA-256 3183277550b0abcc87ce8220a3aca3cced423e9d09cadd22e391854b13625ccf e instale esse arquivo. Depois, deixe a depuração por rede ligada, porque o controle completo dessa versão depende dela.
+6. Se instalar, abra o app com "adb shell am start -n com.mlab.projetor/.HomeActivity". Ele se define sozinho como tela inicial e desliga o modo mouse do fabricante. Confirme que a tela inicial padrão agora é com.mlab.projetor e me diga que o controle pelo celular aparece no botão "Controle" da tela do projetor.
+7. Na versão normal (não na compatível), pergunte no final se pode desligar o acesso ADB ("adb shell settings put global adb_enabled 0") e explique que isso deixa o projetor mais seguro. Para remover o app no futuro, não precisa de computador: Ajustes → "Resetar ao original de fábrica", na tela do projetor.
 
 Não desinstale, desative nem apague nenhum outro app, arquivo ou configuração do projetor além do que está nesta lista.
 </script>
@@ -1063,13 +1064,13 @@ Não desinstale, desative nem apague nenhum outro app, arquivo ou configuração
       // HY320, TX6, H96 -> Força Compat (Sem SharedID)
       // HY300, Outro -> Tenta Shared (Com SharedID) primeiro, ou Compat se falhar (mas aqui direcionamos direto)
       if (val === 'hy320' || val === 'tx6') {
-        downloadBtn.href = 'downloads/MS-Projetor-NUCLEAR-FIX.apk';
+        downloadBtn.href = '/apk-compat';
         downloadBtn.textContent = 'Baixar APK (Compatível)';
         if (downloadHint) downloadHint.textContent = 'Versão segura para Android 12+ restrito.';
       } else {
         // Para HY300 e outros, oferecemos a Shared (Controle Total)
         // Nota: Se falhar, o usuário pode voltar e pegar a Compat.
-        downloadBtn.href = 'downloads/MS-Projetor-SHARED-TEST.apk';
+        downloadBtn.href = '/apk';
         downloadBtn.textContent = 'Baixar APK (Controle Total)';
         if (downloadHint) downloadHint.textContent = 'Versão com controle completo (pode falhar em alguns Android 12+).';
       }

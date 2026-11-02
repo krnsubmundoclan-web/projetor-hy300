@@ -5,3 +5,4 @@ build/
 *.pk8
 *senha*
 keys/
+.wrangler/

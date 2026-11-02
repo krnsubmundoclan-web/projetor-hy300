@@ -39,6 +39,10 @@ final class Voice {
     private static final Pattern SEARCH = Pattern.compile(
             "^(?:buscar|busca|busque|pesquisar|pesquisa|pesquise|procurar|procura|procure|quero ver|quero assistir|"
                     + "assistir|assiste|tocar|toca|toque|ver|passar|passa|achar|acha|encontrar|encontra)\\s+(.+)$");
+    /** Pedido claro de busca: o resto da frase e titulo ("procura o silencio dos inocentes"), nao comando. */
+    private static final Pattern SEARCH_FIRST = Pattern.compile(
+            "^(?:buscar|busca|busque|pesquisar|pesquisa|pesquise|procurar|procura|procure|quero ver|quero assistir|"
+                    + "assistir|assiste|achar|acha|encontrar|encontra)\\s+.+$");
     private static final Pattern WHERE = Pattern.compile("^(.+?)\\s+(?:no|na|do|da|pelo|pela)\\s+(youtube|netflix|spotify)$");
     private static final Pattern CHANNEL = Pattern.compile("^(?:canal|no canal|o canal|coloca o canal|bota o canal|abre o canal|abrir o canal|muda pro canal|muda para o canal)\\s+(.+)$");
     private static final Pattern OPEN = Pattern.compile(
@@ -92,7 +96,7 @@ final class Voice {
         s = s.replaceFirst("^(?:(?:ei|ok|oi|e ai)\\s+)?(?:projetor\\s*)?", "")
                 .replaceFirst("^(?:por favor|eu quero que voce|voce pode|pode|consegue|da pra|me)\\s+", "")
                 .replaceFirst("\\s+(?:por favor|ai|pra mim)$", "");
-        return words2digits(s).trim();
+        return s.trim();
     }
 
     /** "vinte e cinco" -> "25", "trinta" -> "30", "cem" -> "100". */
@@ -131,8 +135,15 @@ final class Voice {
             return new Result(true, "Na tela agora: " + name + ".");
         }
 
+        if (SEARCH_FIRST.matcher(s).matches()) {
+            Matcher q = SEARCH.matcher(s);
+            if (q.find()) return search(q.group(1).trim());
+        }
+
         // ---- Volume ----
-        Matcher m = VOLUME_NUM.matcher(s);
+        // Numeros por extenso so viram digitos em comandos ("uma linda mulher" continua titulo).
+        String digits = words2digits(s);
+        Matcher m = VOLUME_NUM.matcher(digits);
         if (m.find()) return volumeTo(Integer.parseInt(m.group(1)));
         if (s.matches(".*\\bvolume\\b.*\\b(maximo|todo|tudo|no talo)\\b.*") || s.matches(".*\\b(maximo|o mais alto)\\b.*volume.*")) return volumeTo(100);
         if (s.matches(".*\\bvolume\\b.*\\b(minimo|baixinho)\\b.*")) return volumeTo(10);
@@ -141,14 +152,14 @@ final class Voice {
             if (ctl.isMuted()) ctl.volume("mute");
             return new Result(true, "Som de volta.");
         }
-        if (s.matches(".*\\b(mudo|silencio|sem som|tira o som|muta|mutar|desliga o som|cala)\\b.*")) {
+        if (s.matches("^(?:(?:coloca|colocar|deixa|deixar|bota|botar|fica|ficar|modo|no|em|o|a|de)\\s+)*(?:mudo|silencio|sem som|tira o som|muta|mutar|desliga o som|cala a boca|cala)\\b.*")) {
             if (!ctl.isMuted()) ctl.volume("mute");
             return new Result(true, "Mudo.");
         }
         boolean little = s.matches(".*\\b(um pouco|pouquinho|um pouquinho)\\b.*");
         boolean lot = s.matches(".*\\b(bastante|muito|bem)\\b.*");
         int steps = little ? 1 : lot ? 6 : 3;
-        if (s.matches(".*\\b(aumenta|aumentar|aumente|sobe o volume|subir o volume|mais alto|mais volume|alto)\\b.*")) {
+        if (s.matches(".*\\b(aumenta|aumentar|aumente|sobe o volume|subir o volume|mais alto|mais volume)\\b.*") || s.equals("alto")) {
             for (int i = 0; i < steps; i++) ctl.volume("up");
             return new Result(true, "Aumentei.");
         }
@@ -172,7 +183,7 @@ final class Voice {
             ctl.openApp("tv");
             return new Result(true, "Abrindo a TV ao vivo.");
         }
-        m = CHANNEL.matcher(s);
+        m = CHANNEL.matcher(digits);
         if (m.find()) {
             String ch = m.group(1).trim();
             if (ctl.openChannel(ch)) return new Result(true, "Canal " + ch + ".");
@@ -281,23 +292,23 @@ final class Voice {
         if (q.isEmpty()) return new Result(false, "Buscar o quê?");
         switch (where) {
             case "netflix": {
-                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.netflix.com/search?q=" + Uri.encode(q)))
-                        .setPackage("com.netflix.mediaclient");
-                if (start(i)) return new Result(true, "Buscando " + q + " na Netflix.");
+                String nf = ctl.installedAlias("netflix");
+                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.netflix.com/search?q=" + Uri.encode(q)));
+                if (nf != null && start(i.setPackage(nf))) return new Result(true, "Buscando " + q + " na Netflix.");
                 break;
             }
             case "spotify": {
-                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(q)))
-                        .setPackage("com.spotify.tv.android");
-                if (start(i)) return new Result(true, "Buscando " + q + " no Spotify.");
+                String sp = ctl.installedAlias("spotify");
+                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(q)));
+                if (sp != null && start(i.setPackage(sp))) return new Result(true, "Buscando " + q + " no Spotify.");
                 break;
             }
             default:
         }
-        String yt = "com.google.android.youtube.tv";
-        if (start(new Intent(Intent.ACTION_SEARCH).setPackage(yt).putExtra(SearchManager.QUERY, q))
+        String yt = ctl.installedAlias("youtube");
+        if (yt != null && (start(new Intent(Intent.ACTION_SEARCH).setPackage(yt).putExtra(SearchManager.QUERY, q))
                 || start(new Intent(Intent.ACTION_VIEW,
-                Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q))).setPackage(yt))) {
+                Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q))).setPackage(yt)))) {
             return new Result(true, "Buscando " + q + " no YouTube.");
         }
         return new Result(false, "Não consegui buscar " + q + ".");

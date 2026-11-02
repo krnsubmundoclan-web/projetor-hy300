@@ -76,6 +76,16 @@ final class Instalacao {
         s.detalhe = out;
         if (!out.contains("Success")) {
             String u = out.toUpperCase(Locale.ROOT);
+            // Troca entre versao de sistema e compativel: o Android exige remover antes (os ajustes do app se perdem).
+            if (u.contains("UID_CHANGED")) {
+                adb.shell("pm uninstall " + PKG);
+                out = adb.exec("exec:cmd package install -r -S " + apk.length, apk).trim();
+                s.detalhe = out;
+                u = out.toUpperCase(Locale.ROOT);
+            }
+        }
+        if (!out.contains("Success")) {
+            String u = out.toUpperCase(Locale.ROOT);
             if (u.contains("SHARED_USER_INCOMPATIBLE")) {
                 s.resultado = Resultado.INCOMPATIVEL;
                 s.codigoErro = "ERR_102_SHARED_USER";
@@ -112,6 +122,15 @@ final class Instalacao {
             s.telaInicial = telaInicialAtual(adb).startsWith(PKG + "/");
         }
         return s;
+    }
+
+    /** Versao compativel: da de uma vez as permissoes que so o ADB concede; o app cuida do resto. */
+    static void provisionarCompat(AdbClient adb) throws IOException {
+        adb.shell("appops set " + PKG + " SYSTEM_ALERT_WINDOW allow");
+        adb.shell("pm grant " + PKG + " android.permission.WRITE_SECURE_SETTINGS");
+        adb.shell("pm grant " + PKG + " android.permission.READ_EXTERNAL_STORAGE");
+        adb.shell("pm grant " + PKG + " android.permission.WRITE_EXTERNAL_STORAGE");
+        adb.shell("cmd package set-home-activity " + HOME);
     }
 
     static String telaInicialAtual(AdbClient adb) throws IOException {

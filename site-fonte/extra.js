@@ -98,13 +98,13 @@
       // HY320, TX6, H96 -> Força Compat (Sem SharedID)
       // HY300, Outro -> Tenta Shared (Com SharedID) primeiro, ou Compat se falhar (mas aqui direcionamos direto)
       if (val === 'hy320' || val === 'tx6') {
-        downloadBtn.href = 'downloads/MS-Projetor-NUCLEAR-FIX.apk';
+        downloadBtn.href = '/apk-compat';
         downloadBtn.textContent = 'Baixar APK (Compatível)';
         if (downloadHint) downloadHint.textContent = 'Versão segura para Android 12+ restrito.';
       } else {
         // Para HY300 e outros, oferecemos a Shared (Controle Total)
         // Nota: Se falhar, o usuário pode voltar e pegar a Compat.
-        downloadBtn.href = 'downloads/MS-Projetor-SHARED-TEST.apk';
+        downloadBtn.href = '/apk';
         downloadBtn.textContent = 'Baixar APK (Controle Total)';
         if (downloadHint) downloadHint.textContent = 'Versão com controle completo (pode falhar em alguns Android 12+).';
       }

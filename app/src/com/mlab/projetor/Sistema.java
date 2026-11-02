@@ -58,8 +58,10 @@ final class Sistema {
      * So uma vez: se a pessoa trocar depois pelos ajustes do Android, o app respeita.
      */
     static void claimHomeOnce(Context c) {
-        if (Prefs.homeClaimed(c)) return;
         String cur = currentHome(c);
+        // O Android as vezes perde a tela padrao numa atualizacao e fica perguntando qual usar.
+        // Escolha da pessoa por outra tela (cur != null) continua sendo respeitada.
+        if (Prefs.homeClaimed(c) && cur != null) return;
         if (Prefs.originalHome(c) == null) {
             String orig = cur != null && !cur.equals(c.getPackageName()) ? cur : otherHome(c);
             if (orig != null) Prefs.setOriginalHome(c, orig);
@@ -85,6 +87,56 @@ final class Sistema {
             Log.w(TAG, "nao foi possivel definir a tela inicial", e);
             done.accept(false);
         }
+    }
+
+    /** Liga ou desliga a nossa tela de descanso, guardando a do sistema para poder voltar. */
+    static void aplicarDescanso(Context c) {
+        try {
+            ContentResolver cr = c.getContentResolver();
+            Prefs.salvarDescansoOriginal(c, Settings.Secure.getString(cr, "screensaver_components"));
+            if (Prefs.descansoModo(c) == 0) {
+                Settings.Secure.putString(cr, "screensaver_components", Prefs.descansoOriginal(c));
+            } else {
+                Settings.Secure.putString(cr, "screensaver_components", new ComponentName(c, Descanso.class).flattenToString());
+                Settings.Secure.putInt(cr, "screensaver_enabled", 1);
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "nao foi possivel mudar a tela de descanso", e);
+        }
+    }
+
+    /** Fone, caixa de som ou outro aparelho de audio/entrada conectado. HID_HOST e o perfil 4. */
+    static boolean bluetoothConectado() {
+        try {
+            android.bluetooth.BluetoothAdapter bt = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+            if (bt == null || !bt.isEnabled()) return false;
+            for (int perfil : new int[]{android.bluetooth.BluetoothProfile.A2DP, android.bluetooth.BluetoothProfile.HEADSET, 4}) {
+                if (bt.getProfileConnectionState(perfil) == android.bluetooth.BluetoothProfile.STATE_CONNECTED) return true;
+            }
+        } catch (RuntimeException e) {
+            Log.i(TAG, "estado do Bluetooth indisponivel");
+        }
+        return false;
+    }
+
+    /** Um app de receber transmissao esta aberto no aparelho. */
+    static boolean transmitindo(Context c) {
+        if (!Entrada.temSistema(c)) return false;
+        try {
+            java.util.Set<String> receptores = new java.util.HashSet<>();
+            for (Intent i : Hardware.receptores(c).values()) {
+                if (i.getComponent() != null) receptores.add(i.getComponent().getPackageName());
+            }
+            android.app.ActivityManager am = (android.app.ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+            @SuppressWarnings("deprecation")
+            List<android.app.ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(8);
+            for (android.app.ActivityManager.RunningTaskInfo t : tasks) {
+                if (t.numRunning > 0 && t.topActivity != null && receptores.contains(t.topActivity.getPackageName())) return true;
+            }
+        } catch (RuntimeException e) {
+            Log.i(TAG, "estado da transmissao indisponivel");
+        }
+        return false;
     }
 
     static boolean hasMouseMode(Context c) {
@@ -131,6 +183,13 @@ final class Sistema {
 
     private static void restoreSystem(Context c) {
         ContentResolver cr = c.getContentResolver();
+        if (Prefs.descansoOriginal(c) != null) {
+            try {
+                Settings.Secure.putString(cr, "screensaver_components", Prefs.descansoOriginal(c));
+            } catch (RuntimeException e) {
+                Log.w(TAG, "nao foi possivel restaurar a tela de descanso", e);
+            }
+        }
         if (Prefs.systemStateSaved(c)) {
             try {
                 c.getPackageManager().setComponentEnabledSetting(MOUSE_SVC, Prefs.originalMouseState(c),

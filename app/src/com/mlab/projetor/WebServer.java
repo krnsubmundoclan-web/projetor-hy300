@@ -23,6 +23,7 @@ import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,6 +40,7 @@ final class WebServer {
     private static final String TAG = "Projetor";
     private static final String WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private static final long MIN_FREE_BYTES = 300L * 1024 * 1024;
+    private static final long MAX_FOTO_BYTES = 25L * 1024 * 1024;
     private static final int MAX_WORKERS = 8;
     private static final int MAX_PENDING = 16;
     private static final int MAX_WEBSOCKETS = 4;
@@ -150,7 +152,7 @@ final class WebServer {
                 r.length = 0;
             }
             // Corpo de formulario pequeno (POST dos Atalhos) vira parametros, como na query.
-            if ("POST".equals(r.method) && !"/api/upload".equals(r.path) && r.length > 0 && r.length < 65536) {
+            if ("POST".equals(r.method) && !"/api/upload".equals(r.path) && !"/api/fundo".equals(r.path) && r.length > 0 && r.length < 65536) {
                 byte[] body = new byte[(int) r.length];
                 readFully(in, body);
                 String ct = r.h.containsKey("content-type") ? r.h.get("content-type") : "";
@@ -183,12 +185,22 @@ final class WebServer {
             asset(out, "web/icon.png", "image/png");
             return;
         }
+        if (p.equals("/manifest.json")) {
+            asset(out, "web/manifest.json", "application/manifest+json");
+            return;
+        }
         if (p.equals("/font.ttf")) {
             asset(out, "fonts/Inter.ttf", "font/ttf");
             return;
         }
         if (!p.startsWith("/api/") && !p.equals("/ws")) {
             send(out, 404, "text/plain; charset=utf-8", "nao encontrado".getBytes(StandardCharsets.UTF_8));
+            return;
+        }
+        if (p.equals("/api/ola")) {
+            // Aparelho ja salvo que perdeu o token (app instalado na tela de inicio): entra pelo IP.
+            String tk = Aparelhos.porIp(ctx, s.getInetAddress().getHostAddress());
+            json(out, 200, "{\"ok\":true,\"token\":" + (tk == null ? "null" : Json.str(tk)) + "}");
             return;
         }
         String pin = r.q.get("t");
@@ -208,6 +220,60 @@ final class WebServer {
                 return;
             case "/api/key":
                 ok(out, ctl.key(r.q.get("k")));
+                return;
+            case "/api/listas":
+                if ("POST".equals(r.method)) {
+                    if (r.q.containsKey("remover")) {
+                        Iptv.remover(ctx, r.q.get("remover"));
+                    } else {
+                        String erroLista = Iptv.adicionar(ctx, r.q.get("add"));
+                        if (erroLista != null) {
+                            json(out, 200, "{\"ok\":false,\"erro\":" + Json.str(erroLista) + "}");
+                            return;
+                        }
+                    }
+                }
+                StringBuilder ls = new StringBuilder();
+                for (String u : Iptv.listas(ctx)) ls.append(ls.length() > 0 ? "," : "").append(Json.str(u));
+                json(out, 200, "{\"ok\":true,\"listas\":[" + ls + "]}");
+                return;
+            case "/api/transmitir":
+                transmitir(r, out);
+                return;
+            case "/api/personalizar":
+                personalizar(r, out);
+                return;
+            case "/api/fav":
+                if (!"POST".equals(r.method) || r.q.get("pkg") == null) {
+                    json(out, 400, "{\"ok\":false}");
+                    return;
+                }
+                String favPkg = r.q.get("pkg");
+                if (!Prefs.favs(ctx).contains(favPkg) && Apps.favorites(ctx).size() >= AppsActivity.MAX_INICIO) {
+                    json(out, 200, "{\"ok\":false,\"cheio\":true}");
+                    return;
+                }
+                boolean virouFav = Prefs.toggleFav(ctx, favPkg);
+                HomeActivity.refreshTheme();
+                json(out, 200, "{\"ok\":true,\"fav\":" + virouFav + "}");
+                return;
+            case "/api/aparelho/salvar":
+                if (!"POST".equals(r.method)) {
+                    json(out, 405, "{\"ok\":false,\"erro\":\"use POST\"}");
+                    return;
+                }
+                json(out, 200, "{\"ok\":true,\"token\":" + Json.str(Aparelhos.emitir(ctx,
+                        s.getInetAddress().getHostAddress(), r.h.get("user-agent"))) + "}");
+                return;
+            case "/api/aparelho/esquecer":
+                if (!"POST".equals(r.method)) {
+                    json(out, 405, "{\"ok\":false,\"erro\":\"use POST\"}");
+                    return;
+                }
+                for (Aparelhos.Item it : Aparelhos.todos(ctx)) {
+                    if (it.ip.equals(s.getInetAddress().getHostAddress())) Aparelhos.remover(ctx, it.id);
+                }
+                ok(out, true);
                 return;
             case "/api/text":
                 String txt = r.q.get("s");
@@ -250,6 +316,9 @@ final class WebServer {
             case "/api/upload":
                 upload(r, out);
                 return;
+            case "/api/fundo":
+                fundo(r, out);
+                return;
             case "/api/voz":
                 Voice.Result vr = voice.run(r.q.containsKey("s") ? r.q.get("s") : r.q.get("texto"));
                 json(out, 200, "{\"ok\":" + vr.ok + ",\"fala\":" + Json.str(vr.speech) + "}");
@@ -282,13 +351,8 @@ final class WebServer {
                 out.flush();
                 new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                     ctl.hud.message("Restaurando configurações de fábrica…");
-                    try {
-                        // Limpa dados do app e reinicia
-                        Runtime.getRuntime().exec("pm clear com.mlab.projetor");
-                        System.exit(0);
-                    } catch (Exception e) {
-                        ctl.hud.message("Erro ao restaurar: " + e.getMessage());
-                    }
+                    // Limpa os dados do app; o Android encerra o processo.
+                    ((android.app.ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE)).clearApplicationUserData();
                 }, 500);
                 return;
             case "/api/adb":
@@ -324,13 +388,38 @@ final class WebServer {
         String novo = Prefs.newPin(ctx);
         resetAttempts();
         dropClients();
-        HomeActivity.refreshInfo();
         ctl.hud.message("Novo PIN do controle: " + novo);
         return novo;
     }
 
+    /** Escolhido na janela do controle; quem entrou com o PIN antigo precisa do novo. */
+    void fixarPin(String novo) {
+        Prefs.setPinFixo(ctx, novo);
+        resetAttempts();
+        dropClients();
+    }
+
+    /** IPs com o controle aberto agora. */
+    Set<String> conectados() {
+        return new java.util.HashSet<>(clients.values());
+    }
+
+    /** Derruba o controle de um aparelho removido da lista. */
+    void desconectar(String ip) {
+        for (Map.Entry<OutputStream, String> e : clients.entrySet()) {
+            if (!e.getValue().equals(ip)) continue;
+            try {
+                synchronized (e.getKey()) {
+                    frame(e.getKey(), 0x8, new byte[0]);
+                }
+            } catch (IOException ignored) {
+            }
+            clients.remove(e.getKey());
+        }
+    }
+
     private void dropClients() {
-        for (OutputStream o : clients) {
+        for (OutputStream o : clients.keySet()) {
             try {
                 synchronized (o) {
                     frame(o, 0x8, new byte[0]);
@@ -362,8 +451,8 @@ final class WebServer {
         if (until != null && now < until) return false;
         if (pin == null || pin.trim().isEmpty()) return false;
         pin = pin.trim();
-        boolean ok = MessageDigest.isEqual(pin.getBytes(StandardCharsets.UTF_8),
-                Prefs.pin(ctx).getBytes(StandardCharsets.UTF_8));
+        boolean ok = pin.length() == Aparelhos.TOKEN_LEN ? Aparelhos.valido(ctx, pin, ip)
+                : MessageDigest.isEqual(pin.getBytes(StandardCharsets.UTF_8), Prefs.pin(ctx).getBytes(StandardCharsets.UTF_8));
         if (ok) {
             wrongPins.remove(ip);
             lockedUntil.remove(ip);
@@ -432,10 +521,109 @@ final class WebServer {
         json(out, 200, "{\"ok\":true,\"aberto\":" + opened + ",\"arquivo\":" + Json.str(f.getName()) + "}");
     }
 
+    /** Lista os receptores de transmissao de tela deste projetor; POST com abrir=nome abre um. */
+    private void transmitir(Req r, OutputStream out) throws IOException {
+        Map<String, android.content.Intent> lista = Hardware.receptores(ctx);
+        if ("POST".equals(r.method)) {
+            android.content.Intent i = lista.get(r.q.get("abrir"));
+            if (i != null) ctx.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            ok(out, i != null);
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String nome : lista.keySet()) sb.append(sb.length() > 0 ? "," : "").append(Json.str(nome));
+        json(out, 200, "{\"ok\":true,\"lista\":[" + sb + "]}");
+    }
+
+    private static final String[][] ANEIS = {{"temp", "Temperatura"}, {"cpu", "CPU"}, {"ram", "RAM"},
+            {"espaco", "Espaço"}, {"internet", "Internet"}};
+
+    /** O que a aba Personalizar do celular mostra e muda; a tela inicial se redesenha sozinha. */
+    private void personalizar(Req r, OutputStream out) throws IOException {
+        if ("POST".equals(r.method)) {
+            try {
+                if (r.q.containsKey("cor")) {
+                    int c = Integer.parseInt(r.q.get("cor"));
+                    if (c < 0 || c >= Fundo.CORES.length) throw new NumberFormatException();
+                    Prefs.setFundoCor(ctx, c);
+                    Fundo.remover(ctx);
+                }
+                if (r.q.containsKey("descanso")) {
+                    int d = Integer.parseInt(r.q.get("descanso"));
+                    int dc = r.q.containsKey("descansoCor") ? Integer.parseInt(r.q.get("descansoCor")) : Prefs.descansoCor(ctx);
+                    if (d < 0 || d >= Fundo.DESCANSO.length || dc < 0 || dc >= Fundo.CORES.length) throw new NumberFormatException();
+                    Prefs.setDescanso(ctx, d, dc);
+                    Sistema.aplicarDescanso(ctx);
+                }
+                if (r.q.containsKey("escurecer")) {
+                    int e = Integer.parseInt(r.q.get("escurecer"));
+                    if (e < 0 || e >= Fundo.ESCURECER.length) throw new NumberFormatException();
+                    Prefs.setFundoEscurecer(ctx, e);
+                }
+            } catch (NumberFormatException e) {
+                ok(out, false);
+                return;
+            }
+            if (r.q.containsKey("removerFoto")) Fundo.remover(ctx);
+            String anel = r.q.get("anel");
+            if (anel != null) {
+                for (String[] a : ANEIS) if (a[0].equals(anel)) Prefs.setShowRing(ctx, anel, "1".equals(r.q.get("on")));
+            }
+            HomeActivity.refreshTheme();
+            ok(out, true);
+            return;
+        }
+        StringBuilder cores = new StringBuilder(), esc = new StringBuilder(), aneis = new StringBuilder(), desc = new StringBuilder();
+        for (String d : Fundo.DESCANSO) desc.append(desc.length() > 0 ? "," : "").append(Json.str(d));
+        for (String c : Fundo.CORES) cores.append(cores.length() > 0 ? "," : "").append(Json.str(c));
+        for (String e : Fundo.ESCURECER) esc.append(esc.length() > 0 ? "," : "").append(Json.str(e));
+        for (String[] a : ANEIS) {
+            aneis.append(aneis.length() > 0 ? "," : "").append("{\"id\":").append(Json.str(a[0]))
+                    .append(",\"nome\":").append(Json.str(a[1])).append(",\"on\":").append(Prefs.showRing(ctx, a[0])).append('}');
+        }
+        json(out, 200, "{\"ok\":true,\"foto\":" + Fundo.temFoto(ctx) + ",\"cor\":" + Prefs.fundoCor(ctx)
+                + ",\"cores\":[" + cores + "],\"escurecer\":" + Prefs.fundoEscurecer(ctx)
+                + ",\"escurecerOp\":[" + esc + "],\"aneis\":[" + aneis + "],\"descanso\":" + Prefs.descansoModo(ctx)
+                + ",\"descansoCor\":" + Prefs.descansoCor(ctx) + ",\"descansoOp\":[" + desc + "]}");
+    }
+
+    /** Foto de fundo enviada pelo celular: fica so como fundo, a original nao e guardada. */
+    private void fundo(Req r, OutputStream out) throws IOException {
+        if (!"POST".equals(r.method) || r.length <= 0 || r.length > MAX_FOTO_BYTES) {
+            json(out, 400, "{\"ok\":false,\"erro\":\"envie uma foto de até 25 MB\"}");
+            return;
+        }
+        File tmp = File.createTempFile("foto", null, ctx.getCacheDir());
+        try {
+            byte[] buf = new byte[64 * 1024];
+            long left = r.length;
+            try (FileOutputStream fo = new FileOutputStream(tmp)) {
+                while (left > 0) {
+                    int n = r.in.read(buf, 0, (int) Math.min(buf.length, left));
+                    if (n < 0) throw new EOFException();
+                    fo.write(buf, 0, n);
+                    left -= n;
+                }
+            }
+            boolean paraDescanso = "descanso".equals(r.q.get("destino"));
+            boolean ok = paraDescanso ? Fundo.importarDescanso(ctx, tmp) : Fundo.importar(ctx, tmp);
+            if (ok && paraDescanso) {
+                Prefs.setDescanso(ctx, 2, 0);
+                Sistema.aplicarDescanso(ctx);
+            } else if (ok) {
+                HomeActivity.refreshTheme();
+            }
+            json(out, 200, ok ? "{\"ok\":true}" : "{\"ok\":false,\"erro\":\"formato de foto não suportado\"}");
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+        }
+    }
+
     // ---- WebSocket (RFC 6455, so mensagens de texto curtas) ----
 
     /** Celulares conectados, para avisar quando a tela do projetor muda. */
-    private final java.util.Set<OutputStream> clients = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Map<OutputStream, String> clients = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Envio fora da thread principal (rede na main thread derruba o app). */
     private final ExecutorService sender = Executors.newSingleThreadExecutor();
@@ -443,7 +631,7 @@ final class WebServer {
     private void broadcast(String json) {
         final byte[] data = json.getBytes(StandardCharsets.UTF_8);
         sender.execute(() -> {
-            for (OutputStream out : clients) {
+            for (OutputStream out : clients.keySet()) {
                 try {
                     synchronized (out) {
                         frame(out, 0x1, data);
@@ -478,7 +666,7 @@ final class WebServer {
                     + "Sec-WebSocket-Accept: " + accept + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
             out.flush();
             s.setSoTimeout(0);
-            clients.add(out);
+            clients.put(out, s.getInetAddress().getHostAddress());
             try {
                 synchronized (out) {
                     // Estado inicial da tela assim que o celular conecta.
@@ -487,6 +675,8 @@ final class WebServer {
                 readFrames(r.in, out);
             } finally {
                 clients.remove(out);
+                // Ninguem mais com o controle aberto: a seta nao fica largada na tela.
+                if (clients.isEmpty()) ctl.command("cur:0");
             }
         } finally {
             webSockets.decrementAndGet();

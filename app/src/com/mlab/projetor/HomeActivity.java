@@ -31,9 +31,10 @@ import java.util.List;
  */
 public class HomeActivity extends Activity {
     private static final int COLS = 4;
+    private static final int ROWS = 4, ROW_GAP_DP = 14;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private TextView selKind, selName, info;
+    private TextView selKind, selName;
     private UsageRing temperatureUsage, cpuUsage, ramUsage, storageUsage, internetUsage;
     private View hardwarePanel;
     private final HardwareUsage hardware = new HardwareUsage();
@@ -43,25 +44,9 @@ public class HomeActivity extends Activity {
             handler.postDelayed(this, 3_000);
         }
     };
-    /** Painel com o QR do controle: aparece so pelo botao "Celular" do Dock. */
-    private View qrPanel;
-    private ImageView qrImage;
-    private TextView qrAddress;
-    /** Texto do QR atual (refeito so quando o endereco ou o PIN mudam). */
-    private String qrText;
-    private static final long QR_TIMEOUT_MS = 2 * 60_000L;
-    private final Runnable hideQr = () -> showQr(false);
-    private LinearLayout grid, recents;
+    private LinearLayout grid;
     /** Itens do Dock, para ligar a seta para baixo dos cartoes ao Dock (o FocusFinder nao acha sozinho). */
     private final List<View> dockItems = new ArrayList<>();
-
-    private final Runnable tick = new Runnable() {
-        @Override
-        public void run() {
-            updateInfo();
-            handler.postDelayed(this, 30_000);
-        }
-    };
 
     private static HomeActivity current;
 
@@ -95,12 +80,6 @@ public class HomeActivity extends Activity {
         });
     }
 
-    /** PIN trocado pelo celular: atualiza o rodape na hora. */
-    static void refreshInfo() {
-        HomeActivity h = current;
-        if (h != null) h.runOnUiThread(h::updateInfo);
-    }
-
     /** Troca de tema vinda de fora (voz): redesenha a tela inicial se estiver aberta. */
     static void refreshTheme() {
         HomeActivity h = current;
@@ -117,6 +96,8 @@ public class HomeActivity extends Activity {
     protected void onCreate(Bundle b) {
         current = this;
         super.onCreate(b);
+        // O Android repoe o idioma do firmware ao abrir a tela; o relogio usa o idioma padrao.
+        java.util.Locale.setDefault(new java.util.Locale("pt", "BR"));
         setContentView(build());
         App.inst.startKeepAlive();
     }
@@ -124,26 +105,19 @@ public class HomeActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        java.util.Locale.setDefault(new java.util.Locale("pt", "BR"));
         loadFavorites();
-        loadRecents();
-        handler.post(tick);
         applyHardwareVisibility();
         refreshInternet(null);
+        handler.post(statusTick);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        handler.removeCallbacks(tick);
         handler.removeCallbacks(hardwareTick);
+        handler.removeCallbacks(statusTick);
         hardware.resetCpu();
-        if (qrPanel != null) showQr(false);
-    }
-
-    @Override
-    public void onBackPressed() {
-        // Launcher: voltar na tela inicial so fecha o QR, se estiver aberto.
-        if (qrPanel != null && qrPanel.getVisibility() == View.VISIBLE) showQr(false);
     }
 
     private View build() {
@@ -165,7 +139,7 @@ public class HomeActivity extends Activity {
         grid.setGravity(Gravity.CENTER_VERTICAL);
         grid.setPadding(Ui.dp(8), Ui.dp(8), Ui.dp(8), Ui.dp(8));
         grid.addOnLayoutChangeListener((v, l, t, r, b, oldL, oldT, oldR, oldB) -> {
-            if (r - l != oldR - oldL) sizeFavoriteRows();
+            if (r - l != oldR - oldL || b - t != oldB - oldT) sizeFavoriteRows();
         });
         LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(0, -1, 1f);
         glp.leftMargin = Ui.dp(36);
@@ -173,13 +147,6 @@ public class HomeActivity extends Activity {
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-1, 0, 1f);
         mlp.topMargin = Ui.dp(24);
         root.addView(main, mlp);
-
-        TextView favoritesHint = Ui.text(this,
-                "Para remover um favorito, selecione o app e segure OK.", 13, Ui.w500, Ui.MUTED);
-        favoritesHint.setGravity(Gravity.END);
-        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
-        hintLp.topMargin = Ui.dp(12);
-        root.addView(favoritesHint, hintLp);
 
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, Ui.dp(84));
         dlp.gravity = Gravity.CENTER_HORIZONTAL;
@@ -189,105 +156,14 @@ public class HomeActivity extends Activity {
         FrameLayout frame = new FrameLayout(this);
         frame.setClipChildren(false);
         frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
-        frame.addView(qrPanel(), new FrameLayout.LayoutParams(-1, -1));
         return frame;
-    }
-
-    // ---- QR do controle: aponta a camera do celular e abre o controle ja com o PIN ----
-
-    private View qrPanel() {
-        FrameLayout scrim = new FrameLayout(this);
-        scrim.setBackgroundColor(Ui.dark ? 0xB3000000 : 0x80000000);
-        scrim.setVisibility(View.GONE);
-
-        LinearLayout card = Ui.row(this);
-        card.setBackground(Ui.round(Ui.CARD, 28));
-        card.setElevation(Ui.dp(12));
-        card.setPadding(Ui.dp(18), Ui.dp(18), Ui.dp(36), Ui.dp(18));
-        card.setGravity(Gravity.CENTER_VERTICAL);
-        qrImage = new ImageView(this);
-        qrImage.setBackground(Ui.round(0xFFFFFFFF, 18));
-        // A margem branca faz a "zona de silencio" que o leitor de QR precisa.
-        qrImage.setPadding(Ui.dp(14), Ui.dp(14), Ui.dp(14), Ui.dp(14));
-        qrImage.setScaleType(ImageView.ScaleType.CENTER);
-        card.addView(qrImage, new LinearLayout.LayoutParams(Ui.dp(236), Ui.dp(236)));
-
-        LinearLayout txt = Ui.col(this);
-        txt.addView(Ui.text(this, "Controle no celular", 28, Ui.w700, Ui.TEXT));
-        String[] steps = {"1.  Conecte o celular no mesmo Wi‑Fi", "2.  Abra a câmera e aponte para o código",
-                "3.  Toque no link que aparecer"};
-        for (int i = 0; i < steps.length; i++) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.topMargin = Ui.dp(i == 0 ? 18 : 8);
-            txt.addView(Ui.text(this, steps[i], 17, Ui.w500, Ui.TEXT), lp);
-        }
-        TextView chromeHint = Ui.text(this,
-                "Chrome: se aparecer ERR_TOO_MANY_RETRIES, permita Rede local ou Dispositivos próximos em\n"
-                        + "Configurações do Android › Apps › Chrome › Permissões.",
-                13, Ui.w500, Ui.MUTED);
-        chromeHint.setMaxWidth(Ui.dp(680));
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-2, -2);
-        hlp.topMargin = Ui.dp(16);
-        txt.addView(chromeHint, hlp);
-        qrAddress = Ui.text(this, "", 14, Ui.w500, Ui.MUTED);
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
-        alp.topMargin = Ui.dp(14);
-        txt.addView(qrAddress, alp);
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-2, -2);
-        clp.topMargin = Ui.dp(6);
-        txt.addView(Ui.text(this, "Aperte Voltar para fechar", 13, Ui.w500, Ui.MUTED), clp);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
-        tlp.leftMargin = Ui.dp(28);
-        card.addView(txt, tlp);
-
-        scrim.addView(card, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
-        qrPanel = scrim;
-        return scrim;
-    }
-
-    private void toggleQr() {
-        showQr(qrPanel.getVisibility() != View.VISIBLE);
-    }
-
-    private void showQr(boolean show) {
-        handler.removeCallbacks(hideQr);
-        if (show) {
-            String ip = Net.ip();
-            if (ip.indexOf('.') < 0) {
-                App.inst.controller.hud.message("Conecte o projetor ao Wi‑Fi primeiro");
-                return;
-            }
-            updateQr(ip, Prefs.pin(this));
-            handler.postDelayed(hideQr, QR_TIMEOUT_MS);
-        }
-        qrPanel.setVisibility(show ? View.VISIBLE : View.GONE);
-    }
-
-    private void updateQr(String ip, String pin) {
-        if (qrImage == null || ip.indexOf('.') < 0) return;
-        // O PIN vai depois do "#": fica so no celular, nao e enviado na requisicao.
-        String text = "http://" + ip + ":" + ControlService.PORT + "/#p=" + pin;
-        if (!text.equals(qrText)) {
-            android.graphics.Bitmap bmp = Qr.bitmap(text, Ui.dp(208), 0);
-            if (bmp == null) return;
-            android.graphics.drawable.BitmapDrawable d = new android.graphics.drawable.BitmapDrawable(getResources(), bmp);
-            d.setFilterBitmap(false);
-            qrImage.setImageDrawable(d);
-            qrText = text;
-        }
-        qrAddress.setText("Sem câmera? Abra  " + ip + ":" + ControlService.PORT + "  e digite o PIN " + pin);
     }
 
     // ---- Barra superior (estilo barra de menus do macOS) ----
 
     private View topBar() {
         LinearLayout bar = Ui.row(this);
-        // Simbolo monocromatico, sem fundo, na cor do texto do tema.
-        bar.addView(Ui.icon(this, R.drawable.ic_glyph, 28, Ui.TEXT));
-        TextView brand = Ui.text(this, "Projetor", 15, Ui.w600, Ui.TEXT);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-2, -2);
-        blp.leftMargin = Ui.dp(10);
-        bar.addView(brand, blp);
+        bar.addView(Ui.text(this, "M SOLUCTION", 15, Ui.w600, Ui.TEXT));
         String installedVersion = installedVersion();
         if (!installedVersion.isEmpty()) {
             TextView version = Ui.text(this, "v" + installedVersion, 12, Ui.w500, Ui.MUTED);
@@ -296,14 +172,41 @@ public class HomeActivity extends Activity {
             bar.addView(version, vlp);
         }
         bar.addView(Ui.space(this, 1));
-        info = Ui.text(this, "", 13, Ui.w500, Ui.MUTED);
-        bar.addView(info);
+        statusBluetooth = status(bar, R.drawable.ic_bt);
+        statusTransmitir = status(bar, R.drawable.ic_transmitir);
+        statusControle = status(bar, R.drawable.ic_phone);
         ImageView wifi = Ui.icon(this, R.drawable.ic_wifi, 18, Ui.TEXT);
         LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(Ui.dp(18), Ui.dp(18));
         wlp.leftMargin = Ui.dp(16);
         bar.addView(wifi, wlp);
         return bar;
     }
+
+    private ImageView statusBluetooth, statusTransmitir, statusControle;
+
+    private ImageView status(LinearLayout bar, int icone) {
+        ImageView v = Ui.icon(this, icone, 18, Ui.TEXT);
+        v.setVisibility(View.GONE);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(Ui.dp(18), Ui.dp(18));
+        lp.leftMargin = Ui.dp(14);
+        bar.addView(v, lp);
+        return v;
+    }
+
+    /** Icones do topo: so aparecem enquanto o Bluetooth, a transmissao ou o controle estao em uso. */
+    private void updateStatus() {
+        statusBluetooth.setVisibility(Sistema.bluetoothConectado() ? View.VISIBLE : View.GONE);
+        statusTransmitir.setVisibility(Sistema.transmitindo(this) ? View.VISIBLE : View.GONE);
+        statusControle.setVisibility(App.inst.server.conectados().isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private final Runnable statusTick = new Runnable() {
+        @Override
+        public void run() {
+            updateStatus();
+            handler.postDelayed(this, 3000);
+        }
+    };
 
     private String installedVersion() {
         try {
@@ -342,12 +245,6 @@ public class HomeActivity extends Activity {
         tlp.topMargin = Ui.dp(6);
         c.addView(time, tlp);
 
-        recents = Ui.col(this);
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
-        rlp.topMargin = Ui.dp(8);
-        rlp.leftMargin = Ui.dp(4);
-        c.addView(recents, rlp);
-
         c.addView(Ui.vspace(this, 1));
         selKind = Ui.text(this, "", 14, Ui.w600, Ui.ACCENT);
         c.addView(selKind);
@@ -373,49 +270,7 @@ public class HomeActivity extends Activity {
         mlp.topMargin = Ui.dp(30);
         c.addView(meters, mlp);
         hardwarePanel = meters;
-        hardwarePanel.setVisibility(Prefs.showHardware(this) ? View.VISIBLE : View.GONE);
         return c;
-    }
-
-    // ---- Recentes: o que foi assistido por ultimo (curiosidade, sem foco do controle) ----
-
-    private void loadRecents() {
-        recents.removeAllViews();
-        List<String[]> list = Prefs.recents(this);
-        if (list.isEmpty()) return;
-        TextView h = Ui.text(this, "Recentes", 13, Ui.w600, Ui.MUTED);
-        recents.addView(h);
-        int shown = 0;
-        for (String[] r : list) {
-            Apps.Entry e = Apps.entry(this, r[0]);
-            if (e == null) continue;
-            LinearLayout row = Ui.row(this);
-            ImageView iv = new ImageView(this);
-            iv.setImageDrawable(e.icon);
-            iv.setBackground(Ui.round(0xFFFFFFFF, 7));
-            iv.setPadding(Ui.dp(3), Ui.dp(3), Ui.dp(3), Ui.dp(3));
-            iv.setClipToOutline(true);
-            row.addView(iv, new LinearLayout.LayoutParams(Ui.dp(28), Ui.dp(28)));
-            LinearLayout txt = Ui.col(this);
-            boolean hasTitle = !r[1].isEmpty();
-            TextView title = Ui.text(this, hasTitle ? r[1] : e.label, 15, Ui.w600, Ui.TEXT);
-            title.setSingleLine(true);
-            title.setEllipsize(TextUtils.TruncateAt.END);
-            txt.addView(title);
-            if (hasTitle) {
-                TextView app = Ui.text(this, e.label, 12, Ui.w400, Ui.MUTED);
-                LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
-                alp.topMargin = Ui.dp(2);
-                txt.addView(app, alp);
-            }
-            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, -2, 1f);
-            tlp.leftMargin = Ui.dp(12);
-            row.addView(txt, tlp);
-            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, -2);
-            rowLp.topMargin = Ui.dp(12);
-            recents.addView(row, rowLp);
-            if (++shown == 3) break;
-        }
     }
 
     // ---- Favoritos: artes horizontais, 4 colunas x 2 linhas ----
@@ -424,33 +279,35 @@ public class HomeActivity extends Activity {
         grid.removeAllViews();
         List<Apps.Entry> favs = Apps.favorites(this);
         View first = null;
-        boolean addShown = false;
-        for (int r = 0; r < 2; r++) {
+        // So as linhas em uso; o "+" ocupa a vaga seguinte e some com a grade cheia.
+        int total = Math.min(ROWS * COLS, favs.size() + 1);
+        int rows = (total + COLS - 1) / COLS;
+        for (int r = 0; r < rows; r++) {
             LinearLayout row = Ui.row(this);
             row.setClipChildren(false);
             for (int col = 0; col < COLS; col++) {
                 int i = r * COLS + col;
                 View v;
-                if (i < favs.size()) {
+                if (i < favs.size() && i < ROWS * COLS) {
                     v = tile(favs.get(i));
                     if (first == null) first = v;
-                } else if (!addShown) {
+                } else if (i == favs.size()) {
                     v = addTile();
-                    addShown = true;
                 } else {
                     v = new View(this);
                 }
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
-                if (col > 0) lp.leftMargin = Ui.dp(16);
+                if (col > 0) lp.leftMargin = Ui.dp(14);
                 row.addView(v, lp);
-                if (r == 1 && v.isFocusable() && !dockItems.isEmpty()) {
-                    // Cada coluna desce para o item do Dock mais proximo dela.
+                // Sem nada abaixo, a seta desce para o item do Dock mais proximo.
+                if (v.isFocusable() && i + COLS >= total && !dockItems.isEmpty()) {
+                    if (v.getId() == View.NO_ID) v.setId(View.generateViewId());
                     View target = dockItems.get(Math.min(dockItems.size() - 1, col * 2 + 1));
                     v.setNextFocusDownId(target.getId());
                 }
             }
             LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, Ui.dp(60));
-            if (r > 0) rlp.topMargin = Ui.dp(20);
+            if (r > 0) rlp.topMargin = Ui.dp(ROW_GAP_DP);
             grid.addView(row, rlp);
         }
         sizeFavoriteRows();
@@ -461,10 +318,13 @@ public class HomeActivity extends Activity {
         if (first != null && getCurrentFocus() == null) first.requestFocus();
     }
 
+    /** Proporcao de banner, reduzida se preciso para as 4 linhas caberem acima do Dock. */
     private void sizeFavoriteRows() {
         int width = grid.getWidth() - grid.getPaddingLeft() - grid.getPaddingRight();
-        if (width <= Ui.dp(16) * (COLS - 1)) return;
-        int height = Math.round((width - Ui.dp(16) * (COLS - 1)) / (float) COLS * 9f / 16f);
+        if (width <= Ui.dp(14) * (COLS - 1)) return;
+        int height = Math.round((width - Ui.dp(14) * (COLS - 1)) / (float) COLS * 9f / 16f);
+        int area = grid.getHeight() - grid.getPaddingTop() - grid.getPaddingBottom() - Ui.dp(ROW_GAP_DP) * (ROWS - 1);
+        if (area > 0) height = Math.min(height, area / ROWS);
         for (int i = 0; i < grid.getChildCount(); i++) {
             View row = grid.getChildAt(i);
             LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) row.getLayoutParams();
@@ -477,9 +337,9 @@ public class HomeActivity extends Activity {
     private View tile(final Apps.Entry a) {
         FrameLayout t = new FrameLayout(this);
         t.setContentDescription(a.label);
-        t.setBackground(Ui.round(0xFF15161C, 12));
-        t.setClipToOutline(true);
         Drawable banner = Apps.banner(this, a.pkg);
+        t.setBackground(Ui.round(banner != null ? 0xFF15161C : Ui.corDaLogo(a.pkg, a.icon), 12));
+        t.setClipToOutline(true);
         ImageView art = new ImageView(this);
         if (banner != null) {
             art.setImageDrawable(banner);
@@ -506,18 +366,26 @@ public class HomeActivity extends Activity {
         return t;
     }
 
+    private Intent escolherApps() {
+        return new Intent(this, AppsActivity.class).putExtra(AppsActivity.EXTRA_ESCOLHER, true);
+    }
+
     private View addTile() {
         LinearLayout t = Ui.col(this);
         t.setGravity(Gravity.CENTER);
         GradientDrawable bg = Ui.glass(12);
         t.setBackground(bg);
-        t.addView(Ui.icon(this, R.drawable.ic_plus, 30, Ui.MUTED));
-        t.setContentDescription("Adicionar app");
+        t.addView(Ui.icon(this, R.drawable.ic_plus, 26, Ui.TEXT));
+        TextView addLabel = Ui.text(this, "Adicionar à tela inicial", 11, Ui.w500, Ui.MUTED);
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(-2, -2);
+        addLp.topMargin = Ui.dp(4);
+        t.addView(addLabel, addLp);
+        t.setContentDescription("Adicionar à tela inicial");
         Ui.focusableIcon(t, () -> {
-            selKind.setText("Favoritos");
+            selKind.setText("Tela inicial");
             selName.setText("Adicionar app");
         });
-        t.setOnClickListener(v -> open(new Intent(this, AppsActivity.class)));
+        t.setOnClickListener(v -> open(escolherApps()));
         return t;
     }
 
@@ -536,13 +404,7 @@ public class HomeActivity extends Activity {
         // Keystone: tenta pacotes específicos do chipset
         Intent keystoneIntent = Hardware.findAvailable(this, Hardware.getKeystoneIntents(chipset));
         if (keystoneIntent != null) {
-            dockItem(d, "Keystone", R.drawable.ic_keystone, keystoneIntent);
-        }
-
-        // Imagem/Display: tenta pacotes específicos do chipset
-        Intent imageIntent = Hardware.findAvailable(this, Hardware.getImageAdjustmentIntents(chipset));
-        if (imageIntent != null) {
-            dockItem(d, "Imagem", R.drawable.ic_image, imageIntent);
+            dockItem(d, "Projeção", R.drawable.ic_keystone, keystoneIntent);
         }
 
         // HDMI/Input: tenta pacotes específicos do chipset
@@ -563,13 +425,12 @@ public class HomeActivity extends Activity {
         d.addView(sep, slp);
 
         dockItem(d, "Apps", R.drawable.ic_apps, new Intent(this, AppsActivity.class));
-        dockItem(d, "Celular", R.drawable.ic_phone, null).setOnClickListener(v -> toggleQr());
-        View theme = dockItem(d, Ui.dark ? "Claro" : "Escuro", Ui.dark ? R.drawable.ic_sun : R.drawable.ic_moon, null);
-        theme.setOnClickListener(v -> {
-            Prefs.setDark(this, !Ui.dark);
-            Ui.applyTheme(!Ui.dark);
-            recreate();
-        });
+        dockItem(d, "Abertos", R.drawable.ic_abertos, null).setOnClickListener(v -> App.inst.controller.abrirAbertos());
+        dockItem(d, "Controle", R.drawable.ic_phone, new Intent(this, ControleActivity.class));
+        if (!Hardware.receptores(this).isEmpty()) {
+            dockItem(d, "Transmitir", R.drawable.ic_transmitir, null).setOnClickListener(v -> transmitir());
+        }
+        dockItem(d, "Personalizar", R.drawable.ic_personalizar, new Intent(this, PersonalizarActivity.class));
         return d;
     }
 
@@ -616,33 +477,34 @@ public class HomeActivity extends Activity {
     }
 
     private void settingsMenu() {
-        String hardwareAction = Prefs.showHardware(this)
-                ? "Ocultar temperatura, CPU, RAM, espaço e internet" : "Mostrar temperatura, CPU, RAM, espaço e internet";
-        String[] items = {"Ajustes do Android", hardwareAction, "Testar velocidade da internet", "Procurar atualização", "Gerar novo PIN do controle", "Voltar à tela original e remover o app"};
+        String[] items = {"Configurações", "Testar velocidade da internet", "Procurar atualização", "Resetar ao original de fábrica"};
         dialog().setTitle("Ajustes").setItems(items, (dlg, which) -> {
             if (which == 0) {
                 Intent tv = comp("com.android.tv.settings", "com.android.tv.settings.MainSettings");
                 open(available(tv) ? tv : new Intent(Settings.ACTION_SETTINGS));
             } else if (which == 1) {
-                Prefs.setShowHardware(this, !Prefs.showHardware(this));
-                applyHardwareVisibility();
-            } else if (which == 2) {
                 testInternet();
-            } else if (which == 3) {
+            } else if (which == 2) {
                 procurarAtualizacao();
-            } else if (which == 4) {
-                dialog().setTitle("Gerar novo PIN?")
-                        .setMessage("Os celulares conectados e os atalhos da Siri vão precisar do PIN novo.")
-                        .setPositiveButton("Gerar", (x, y) -> App.inst.server.regeneratePin())
-                        .setNegativeButton("Cancelar", null).show();
             } else {
-                dialog().setTitle("Remover o app Projetor?")
-                        .setMessage("O projetor volta para a tela inicial e o modo mouse de fábrica, "
-                                + "e o app Projetor é removido. Seus apps e arquivos não são apagados.")
-                        .setPositiveButton("Remover", (x, y) -> Sistema.restoreAndUninstall(this))
+                dialog().setTitle("Resetar ao original de fábrica?")
+                        .setMessage("A tela inicial e o modo mouse de fábrica voltam, e este app é apagado do projetor, "
+                                + "com o PIN, a foto de fundo e os aparelhos salvos. Seus outros apps e arquivos não são apagados.")
+                        .setPositiveButton("Resetar e apagar", (x, y) -> Sistema.restoreAndUninstall(this))
                         .setNegativeButton("Cancelar", null).show();
             }
         }).show();
+    }
+
+    /** Abre o app de receber transmissao; com mais de um, a pessoa escolhe pelo aparelho dela. */
+    private void transmitir() {
+        final java.util.Map<String, Intent> r = Hardware.receptores(this);
+        if (r.size() == 1) {
+            open(r.values().iterator().next());
+            return;
+        }
+        final String[] nomes = r.keySet().toArray(new String[0]);
+        dialog().setTitle("Transmitir de qual aparelho?").setItems(nomes, (d, w) -> open(r.get(nomes[w]))).show();
     }
 
     private static Intent comp(String pkg, String cls) {
@@ -659,12 +521,6 @@ public class HomeActivity extends Activity {
         }
     }
 
-    private void updateInfo() {
-        String ip = Net.ip();
-        String pin = Prefs.pin(this);
-        info.setText("Controle no celular  " + ip + ":" + ControlService.PORT + "  ·  PIN " + pin);
-        updateQr(ip, pin);
-    }
 
     private void updateHardware() {
         temperatureUsage.setTemperature(Temperature.readHighest());
@@ -688,10 +544,16 @@ public class HomeActivity extends Activity {
         hardware.resetCpu();
         boolean show = Prefs.showHardware(this);
         hardwarePanel.setVisibility(show ? View.VISIBLE : View.GONE);
+        temperatureUsage.setVisibility(Prefs.showRing(this, "temp") ? View.VISIBLE : View.GONE);
+        cpuUsage.setVisibility(Prefs.showRing(this, "cpu") ? View.VISIBLE : View.GONE);
+        ramUsage.setVisibility(Prefs.showRing(this, "ram") ? View.VISIBLE : View.GONE);
+        storageUsage.setVisibility(Prefs.showRing(this, "espaco") ? View.VISIBLE : View.GONE);
+        internetUsage.setVisibility(Prefs.showRing(this, "internet") ? View.VISIBLE : View.GONE);
         if (show) {
             cpuUsage.setUsage(-1);
             handler.post(hardwareTick);
-            App.inst.testInternet(false);
+            if (Prefs.showRing(this, "internet")) App.inst.testInternet(false);
+            else App.inst.cancelInternetTest();
         } else {
             App.inst.cancelInternetTest();
         }
@@ -699,7 +561,7 @@ public class HomeActivity extends Activity {
 
     private void testInternet() {
         if (!Prefs.showHardware(this)) {
-            App.inst.controller.hud.message("Mostre os gráficos para testar a internet.");
+            App.inst.controller.hud.message("Ligue um indicador em Personalizar para testar a internet.");
             return;
         }
         if (App.inst.testingInternet) {

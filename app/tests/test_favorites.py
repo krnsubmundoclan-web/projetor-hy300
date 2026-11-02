@@ -68,9 +68,11 @@ public class FavoritesTest extends Context implements SharedPreferences, SharedP
  for (int i=1;i<=6;i++) check(eight.contains("app"+i));
  check(!Prefs.toggleFav(c,"app3")); check(Prefs.favs(c).size()==7);
  check(Prefs.toggleFav(c,"app3")); check(Prefs.favs(c).size()==8);
- // Preserva o contrato existente ao adicionar o nono: substitui o ultimo favorito.
- check(Prefs.toggleFav(c,"app7")); check(Prefs.favs(c).size()==8);
- check(!Prefs.favs(c).contains("app3")); check(Prefs.favs(c).contains("app7"));
+ // Cabem 16; ao passar disso, Prefs preserva o contrato de substituir o ultimo favorito.
+ for (int i=7;i<=14;i++) check(Prefs.toggleFav(c,"app"+i));
+ check(Prefs.favs(c).size()==16);
+ check(Prefs.toggleFav(c,"app15")); check(Prefs.favs(c).size()==16);
+ check(!Prefs.favs(c).contains("app14")); check(Prefs.favs(c).contains("app15"));
  System.out.println("Favoritos e preferencia persistente dos graficos OK");
  }
 }''',

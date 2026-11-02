@@ -122,6 +122,10 @@ final class Hardware {
                 intents.add(comp("com.amlogic.keystone", "com.amlogic.keystone.MainActivity"));
                 break;
             default:
+                // Firmware que se identifica como outro aparelho (o HY300 diz ser ADT-3): tenta todos.
+                intents.add(comp("com.telanda.keystone", "com.telanda.keystone.MainActivity"));
+                intents.add(comp("com.rockchip.keystone", "com.rockchip.keystone.MainActivity"));
+                intents.add(comp("com.amlogic.keystone", "com.amlogic.keystone.MainActivity"));
                 break;
         }
         return intents;
@@ -181,5 +185,23 @@ final class Hardware {
 
     private static Intent comp(String pkg, String cls) {
         return new Intent(Intent.ACTION_MAIN).setComponent(new android.content.ComponentName(pkg, cls));
+    }
+
+    /** Apps de receber transmissao deste aparelho: {para quem serve, pacote}. */
+    private static final String[][] RECEPTORES = {
+            {"iPhone, iPad e Mac (AirPlay)", "com.waxrain.airplaydmr2"},
+            {"Android e Windows (Miracast)", "com.softwinner.miracastReceiver"},
+            {"Android e Windows (Miracast)", "com.android.tv.miracast"},
+            {"Celular e TV (AnyCast)", "com.softwinner.anycast"},
+    };
+
+    /** So os que existem aqui, cada um com a Intent que abre. */
+    static java.util.Map<String, Intent> receptores(Context ctx) {
+        java.util.Map<String, Intent> out = new java.util.LinkedHashMap<>();
+        for (String[] r : RECEPTORES) {
+            Intent i = Apps.launchIntent(ctx, r[1]);
+            if (i != null && !out.containsKey(r[0])) out.put(r[0], i);
+        }
+        return out;
     }
 }

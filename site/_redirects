@@ -1,2 +1,4 @@
-/apk  /downloads/Projetor.apk  302
-/app  /downloads/ProjetorInstalador.apk  302
+/apk  https://github.com/krnsubmundoclan-web/projetor-hy300/releases/download/v5.0.0/Projetor.apk  302
+/apk-compat  https://github.com/krnsubmundoclan-web/projetor-hy300/releases/download/v5.0.0/Projetor-compat.apk  302
+/app  https://github.com/krnsubmundoclan-web/projetor-hy300/releases/download/v5.0.0/ProjetorInstalador.apk  302
+/kit  https://github.com/krnsubmundoclan-web/projetor-hy300/releases/download/v5.0.0/projetor-kit-pc.zip  302

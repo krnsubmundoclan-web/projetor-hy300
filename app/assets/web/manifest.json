@@ -1,0 +1,10 @@
+{
+  "name": "Controle",
+  "short_name": "Controle",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#08090D",
+  "theme_color": "#08090D",
+  "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]
+}

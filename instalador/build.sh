@@ -10,8 +10,8 @@ SDK=/c/dev/android/sdk
 BT=$SDK/build-tools/34.0.0
 AJ=$SDK/platforms/android-30/android.jar
 KEYS=/c/dev/android/keys
-VERSION_CODE=${VERSION_CODE:-1}
-VERSION_NAME=${VERSION_NAME:-1.0.0}
+VERSION_CODE=${VERSION_CODE:-3}
+VERSION_NAME=${VERSION_NAME:-1.1.0}
 KS_PASS=$(grep '^senha:' "$KEYS/instalador-senha.txt" | cut -d' ' -f2)
 
 rm -rf build/apk && mkdir -p build/apk/gen build/apk/classes build/apk/dex

@@ -308,13 +308,14 @@ public class MainActivity extends Activity {
     private void instalarCompat() {
         limpar("instalando");
         titulo("Instalando versão compatível…");
-        texto("Esta versão tem controle limitado em apps como Netflix.", INK2, 14);
+        texto("Para este aparelho. Deixe a depuração por rede (ADB) ligada para o controle funcionar por completo.", INK2, 14);
         espaco(24);
         carregando();
         worker.execute(() -> {
             try {
                 byte[] apk = asset("Projetor-compat.apk");
                 final Instalacao.Saida s = Instalacao.instalar(adb, info, apk);
+                if (s.resultado == Instalacao.Resultado.OK) Instalacao.provisionarCompat(adb);
                 runOnUiThread(() -> resultado(s));
             } catch (Exception e) {
                 final String msg = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -341,7 +342,7 @@ public class MainActivity extends Activity {
                 texto(s.detalhe.isEmpty() ? "O projetor recusou o arquivo." : s.detalhe, INK2, 14);
                 espaco(24);
                 // Botão específico para fallback manual conforme pedido do usuário
-                botao("Instalar versão compatível (controle limitado)", true, v -> instalarCompat());
+                botao("Instalar versão compatível", true, v -> instalarCompat());
                 botao("Voltar ao início", false, v -> inicio());
                 return;
             case ANDROID_ANTIGO:

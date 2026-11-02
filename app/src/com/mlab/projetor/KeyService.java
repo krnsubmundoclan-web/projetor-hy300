@@ -13,6 +13,113 @@ import android.view.accessibility.AccessibilityNodeInfo;
  */
 public class KeyService extends AccessibilityService {
     private static final int MAX_LEN = 80;
+    /** Ligado nos ajustes de acessibilidade; null quando desligado. */
+    static volatile KeyService inst;
+
+    @Override
+    protected void onServiceConnected() {
+        inst = this;
+    }
+
+    @Override
+    public boolean onUnbind(android.content.Intent intent) {
+        inst = null;
+        return super.onUnbind(intent);
+    }
+
+    // ---- Controle sem permissao de sistema (versao compativel) ----
+
+    boolean toque(float x, float y, boolean longo) {
+        android.graphics.Path p = new android.graphics.Path();
+        p.moveTo(x, y);
+        return gesto(p, longo ? 700 : 50);
+    }
+
+    boolean arrasto(float x0, float y0, float x1, float y1) {
+        android.graphics.Path p = new android.graphics.Path();
+        p.moveTo(x0, y0);
+        p.lineTo(x1, y1);
+        return gesto(p, 120);
+    }
+
+    private boolean gesto(android.graphics.Path p, long ms) {
+        return dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(p, 0, ms)).build(), null, null);
+    }
+
+    /** Sem injetar teclas: voltar e inicio sao acoes globais; setas e OK agem sobre o item focado. */
+    boolean tecla(int code) {
+        switch (code) {
+            case KeyEvent.KEYCODE_BACK:
+                return performGlobalAction(GLOBAL_ACTION_BACK);
+            case KeyEvent.KEYCODE_HOME:
+                return performGlobalAction(GLOBAL_ACTION_HOME);
+            case KeyEvent.KEYCODE_POWER:
+            case KeyEvent.KEYCODE_SLEEP:
+                return performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return foco(android.view.View.FOCUS_UP);
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return foco(android.view.View.FOCUS_DOWN);
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                return foco(android.view.View.FOCUS_LEFT);
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return foco(android.view.View.FOCUS_RIGHT);
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+                return clicarFoco();
+            case KeyEvent.KEYCODE_DEL:
+                return apagar();
+            default:
+                return false;
+        }
+    }
+
+    private AccessibilityNodeInfo focado() {
+        AccessibilityNodeInfo n = findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+        return n != null ? n : findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
+    }
+
+    private boolean foco(int direcao) {
+        AccessibilityNodeInfo atual = focado();
+        if (atual == null) {
+            AccessibilityNodeInfo raiz = getRootInActiveWindow();
+            if (raiz == null) return false;
+            AccessibilityNodeInfo primeiro = raiz.focusSearch(android.view.View.FOCUS_FORWARD);
+            return primeiro != null && primeiro.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+        }
+        AccessibilityNodeInfo prox = atual.focusSearch(direcao);
+        return prox != null && prox.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+    }
+
+    private boolean clicarFoco() {
+        AccessibilityNodeInfo n = focado();
+        for (int i = 0; n != null && i < 6; i++) {
+            if (n.isClickable()) return n.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            n = n.getParent();
+        }
+        return false;
+    }
+
+    boolean texto(String s) {
+        AccessibilityNodeInfo n = focado();
+        if (n == null || !n.isEditable()) return false;
+        CharSequence atual = n.getText();
+        return definirTexto(n, (atual == null ? "" : atual.toString()) + s);
+    }
+
+    private boolean apagar() {
+        AccessibilityNodeInfo n = focado();
+        if (n == null || !n.isEditable() || n.getText() == null || n.getText().length() == 0) return false;
+        CharSequence t = n.getText();
+        return definirTexto(n, t.subSequence(0, t.length() - 1).toString());
+    }
+
+    private static boolean definirTexto(AccessibilityNodeInfo n, String s) {
+        android.os.Bundle b = new android.os.Bundle();
+        b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, s);
+        return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b);
+    }
 
     @Override
     protected boolean onKeyEvent(KeyEvent e) {
